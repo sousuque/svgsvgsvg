@@ -1,0 +1,1576 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>body{margin:0}img{max-width:100%}</style>
+<title>SVGトレース工房</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Zen+Kaku+Gothic+Antique:wght@700;900&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
+<style>
+/* Layout: 左に操作パネル、右にカッティングマット上の比較ステージ。境界線をドラッグして元画像とSVGを見比べる */
+:root {
+  --bg: #eef0ec;
+  --surface: #fbfcfa;
+  --ink: #1c2321;
+  --muted: #5d6a64;
+  --line: #d3d9d4;
+  --accent: #1d7552;
+  --accent-ink: #ffffff;
+  --accent-soft: #dcefe5;
+  --mat: #2f6b52;
+  --mat-line: rgba(255,255,255,.10);
+  --mat-major: rgba(255,255,255,.22);
+  --warn: #9a5b00;
+  --warn-soft: #fbefd9;
+  --danger: #a3322b;
+  --f-display: "Zen Kaku Gothic Antique", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+  --f-body: "Zen Kaku Gothic New", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111614; --surface: #19201d; --ink: #e5ebe7; --muted: #94a39b; --line: #2c3632;
+    --accent: #4cc08c; --accent-ink: #0d1a14; --accent-soft: #1d3329;
+    --mat: #1d3f31; --mat-line: rgba(255,255,255,.07); --mat-major: rgba(255,255,255,.15);
+    --warn: #f0b45a; --warn-soft: #33281a; --danger: #ff8a80;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111614; --surface: #19201d; --ink: #e5ebe7; --muted: #94a39b; --line: #2c3632;
+  --accent: #4cc08c; --accent-ink: #0d1a14; --accent-soft: #1d3329;
+  --mat: #1d3f31; --mat-line: rgba(255,255,255,.07); --mat-major: rgba(255,255,255,.15);
+  --warn: #f0b45a; --warn-soft: #33281a; --danger: #ff8a80;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--f-body); font-size: 14px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+}
+.wrap { max-width: 1280px; margin: 0 auto; display: grid; gap: 18px; }
+
+header.top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; }
+header.top h1 {
+  font-family: var(--f-display); font-weight: 900; font-size: 1.75rem; letter-spacing: .02em;
+  margin: 0; line-height: 1.2; text-wrap: balance;
+}
+header.top h1 .arrow { color: var(--accent); font-family: var(--f-mono); font-weight: 500; font-size: .7em; margin-inline: .25em; }
+header.top p { margin: 0; color: var(--muted); max-width: 60ch; }
+
+.app { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 900px) { .app { grid-template-columns: minmax(0, 1fr); } }
+
+.panel {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+  display: grid; gap: 0;
+}
+.sec { padding: 16px; display: grid; gap: 10px; border-top: 1px solid var(--line); min-width: 0; }
+.sec:first-child { border-top: 0; }
+.sec h2 {
+  margin: 0; font-family: var(--f-body); font-weight: 700; font-size: .72rem;
+  letter-spacing: .12em; color: var(--muted); text-transform: uppercase;
+  display: flex; justify-content: space-between; align-items: baseline;
+}
+.sec h2 small { font-family: var(--f-mono); letter-spacing: 0; font-weight: 400; text-transform: none; }
+
+/* Drop zone */
+.drop {
+  border: 1.5px dashed var(--line); border-radius: 8px; padding: 16px; text-align: center;
+  display: grid; gap: 8px; justify-items: center; transition: border-color .15s, background .15s;
+}
+.drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.drop .hint { color: var(--muted); font-size: .82rem; }
+.formats { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.formats span {
+  font-family: var(--f-mono); font-size: .7rem; padding: 1px 7px; border-radius: 4px;
+  border: 1px solid var(--line); color: var(--muted);
+}
+
+button, .btn {
+  font: inherit; font-weight: 500; cursor: pointer; border-radius: 7px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  padding: 7px 14px; line-height: 1.3; display: inline-flex; align-items: center; gap: 6px;
+}
+button:hover { border-color: var(--muted); }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+button.primary:hover { filter: brightness(1.06); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+
+/* File list */
+.files { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.files li {
+  display: grid; grid-template-columns: 44px minmax(0,1fr) auto; gap: 10px; align-items: center;
+  padding: 6px; border-radius: 8px; border: 1px solid transparent; cursor: pointer;
+}
+.files li:hover { background: var(--bg); }
+.files li[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.files .thumb {
+  width: 44px; height: 44px; border-radius: 5px; object-fit: cover; background: var(--bg);
+  border: 1px solid var(--line);
+}
+.files .nm { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.files .meta { font-family: var(--f-mono); font-size: .7rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.files .rm { border: 0; background: none; padding: 4px 8px; color: var(--muted); font-size: 1.1rem; }
+.files .rm:hover { color: var(--danger); }
+.files.locked .rm { visibility: hidden; }
+.files .stline { margin-top: 2px; }
+.st {
+  display: inline-block; font-family: var(--f-mono); font-size: .68rem; line-height: 1.5;
+  padding: 0 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted);
+}
+.st.ok { border-color: transparent; background: var(--accent-soft); color: var(--accent); }
+.st.err { border-color: var(--danger); color: var(--danger); }
+.st.busy { border-color: var(--accent); color: var(--accent); }
+
+/* 一括変換 */
+.batch { display: grid; gap: 8px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.batch-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.batch-row button { flex: 1 1 auto; justify-content: center; }
+.batch-prog { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.batch-prog span { font-family: var(--f-mono); font-size: .76rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+progress { width: 100%; height: 8px; accent-color: var(--accent); }
+.bmodes { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.bmodes legend { padding: 0; margin-bottom: 6px; font-size: .78rem; color: var(--muted); }
+.bmodes label {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: .86rem;
+  padding: 4px 11px 4px 8px; border: 1px solid var(--line); border-radius: 99px;
+}
+.bmodes label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.bmodes input { accent-color: var(--accent); margin: 0; }
+.bmodes:has(input:disabled) label { opacity: .55; cursor: not-allowed; }
+.batch-note { margin: 0; font-size: .76rem; color: var(--muted); }
+.switch input:disabled + .sw-track { opacity: .5; }
+.switch:has(input:disabled) { cursor: not-allowed; }
+.badge { font-size: .65rem; font-weight: 700; padding: 0 6px; border-radius: 4px; background: var(--warn-soft); color: var(--warn); margin-left: 4px; vertical-align: 1px; }
+
+/* Segmented mode switch */
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); border-radius: 8px; padding: 3px; gap: 3px; }
+.seg button { border: 0; justify-content: center; padding: 7px 4px; border-radius: 5px; background: transparent; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+.mode-note { margin: 0; font-size: .82rem; color: var(--muted); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { padding: 4px 11px; border-radius: 99px; font-size: .82rem; }
+.chips button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
+
+.ctl { display: grid; gap: 3px; }
+.ctl label { display: flex; justify-content: space-between; gap: 8px; font-size: .86rem; }
+.ctl output { font-family: var(--f-mono); font-size: .78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ctl .ends { display: flex; justify-content: space-between; font-size: .7rem; color: var(--muted); margin-top: -2px; }
+input[type="range"] { width: 100%; accent-color: var(--accent); margin: 2px 0; }
+select { font: inherit; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+.check { display: flex; gap: 8px; align-items: flex-start; font-size: .86rem; cursor: pointer; }
+.check input { accent-color: var(--accent); margin-top: 4px; }
+.check small { display: block; color: var(--muted); font-size: .76rem; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: .86rem; }
+input[type="color"] { width: 44px; height: 28px; border: 1px solid var(--line); border-radius: 6px; padding: 2px; background: var(--surface); }
+
+/* Preview column */
+.viewer { display: grid; gap: 12px; min-width: 0; }
+.bar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; }
+.tabs, .zoom { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; padding: 3px; gap: 2px; background: var(--surface); }
+.tabs button, .zoom button { border: 0; padding: 5px 12px; border-radius: 5px; background: transparent; color: var(--muted); font-size: .86rem; }
+.tabs button[aria-pressed="true"], .zoom button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+.zoom button { font-family: var(--f-mono); font-size: .78rem; }
+
+.mat {
+  position: relative; border-radius: var(--r); overflow: auto;
+  background-color: var(--mat);
+  background-image:
+    linear-gradient(var(--mat-major) 1px, transparent 1px),
+    linear-gradient(90deg, var(--mat-major) 1px, transparent 1px),
+    linear-gradient(var(--mat-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--mat-line) 1px, transparent 1px);
+  background-size: 80px 80px, 80px 80px, 16px 16px, 16px 16px;
+  background-position: -1px -1px;
+  height: min(68vh, 620px); min-height: 300px;
+}
+.mat-inner { min-width: 100%; min-height: 100%; display: grid; place-items: center; padding: 24px; width: max-content; }
+.stage { position: relative; user-select: none; -webkit-user-select: none; }
+.stage img.layer { position: absolute; inset: 0; width: 100%; height: 100%; display: block; max-width: none; }
+.stage.pix img.orig { image-rendering: pixelated; }
+.divider {
+  position: absolute; top: 0; bottom: 0; width: 0; transform: translateX(-1px);
+  border-left: 2px solid #ffffff; box-shadow: 0 0 0 1px rgba(0,0,0,.25);
+  cursor: ew-resize; touch-action: none;
+}
+.divider .node {
+  position: absolute; top: 50%; left: -1px; width: 16px; height: 16px; transform: translate(-50%, -50%);
+  background: #ffffff; border: 2px solid var(--accent); border-radius: 2px;
+}
+.divider .node::before, .divider .node::after {
+  content: ""; position: absolute; top: 50%; width: 30px; height: 2px; background: #ffffff;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.2);
+}
+.divider .node::before { right: 100%; margin-right: 2px; }
+.divider .node::after { left: 100%; margin-left: 2px; }
+.divider .grab {
+  position: absolute; top: 50%; left: 0; width: 44px; height: 64px; transform: translate(-50%, -50%);
+}
+.stage-labels { position: absolute; inset: 8px 8px auto 8px; display: flex; justify-content: space-between; pointer-events: none; }
+.stage-labels span {
+  font-family: var(--f-mono); font-size: .7rem; padding: 2px 8px; border-radius: 4px;
+  background: rgba(20, 26, 23, .78); color: #ffffff;
+}
+.empty {
+  color: #ffffff; text-align: center; display: grid; gap: 6px; justify-items: center; opacity: .9; max-width: 32ch;
+}
+.empty strong { font-family: var(--f-display); font-size: 1.15rem; }
+.busy {
+  position: absolute; inset: auto auto 12px 12px; z-index: 3;
+  background: rgba(20, 26, 23, .85); color: #ffffff; border-radius: 6px; padding: 6px 12px;
+  font-size: .82rem; display: flex; gap: 8px; align-items: center;
+}
+.spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(255,255,255,.3); border-top-color: #ffffff; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 3s; } }
+
+textarea#code {
+  width: 100%; height: min(68vh, 620px); min-height: 300px; resize: vertical;
+  font-family: var(--f-mono); font-size: .76rem; line-height: 1.5;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r);
+  padding: 14px; white-space: pre; overflow: auto;
+}
+
+.stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden;
+}
+.stat { padding: 10px 14px; border-left: 1px solid var(--line); margin-left: -1px; min-width: 0; }
+.stat dt { font-size: .7rem; color: var(--muted); letter-spacing: .06em; }
+.stat dd { margin: 0; font-family: var(--f-mono); font-weight: 500; font-size: .98rem; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat dd small { color: var(--muted); font-weight: 400; font-size: .74rem; margin-left: 4px; }
+.up { color: var(--warn); }
+.down { color: var(--accent); }
+
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.actions .fname { font-family: var(--f-mono); font-size: .8rem; color: var(--muted); margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; max-width: 100%; }
+.notice {
+  font-size: .84rem; padding: 8px 12px; border-radius: 8px; background: var(--warn-soft); color: var(--ink);
+  border: 1px solid transparent; margin: 0;
+}
+.notice.err { border-color: var(--danger); background: transparent; color: var(--danger); }
+
+.toast {
+  position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
+  background: var(--ink); color: var(--surface); padding: 8px 16px; border-radius: 8px; font-size: .88rem;
+  z-index: 20; max-width: calc(100% - 32px);
+}
+/* 50KB制限スイッチ */
+.switch { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; cursor: pointer; position: relative; }
+.sw-text strong { display: block; font-weight: 700; font-size: .92rem; }
+.sw-text small { display: block; color: var(--muted); font-size: .76rem; line-height: 1.5; }
+.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.sw-track {
+  width: 46px; height: 26px; border-radius: 99px; background: var(--line); position: relative;
+  transition: background .18s;
+}
+.sw-thumb {
+  position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--surface); box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .18s;
+}
+.switch input:checked + .sw-track { background: var(--accent); }
+.switch input:checked + .sw-track .sw-thumb { transform: translateX(20px); }
+.switch input:focus-visible + .sw-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .sw-track, .sw-thumb { transition: none; } }
+.notice.ok { background: var(--accent-soft); }
+
+[hidden] { display: none !important; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>SVGトレース工房<span class="arrow">px→path</span></h1>
+    <p>JPG・PNG・WEBP・GIF・PEF（PENTAX RAW）の画像を、ブラウザの中でSVGに変換します。画像はどこにも送信されません。</p>
+  </header>
+
+  <div class="app">
+    <!-- 操作パネル -->
+    <aside class="panel" aria-label="変換の設定">
+      <section class="sec">
+        <h2>画像 <small id="fileCount"></small></h2>
+        <div class="drop" id="drop">
+          <button class="primary" id="pick" type="button">画像を選択</button>
+          <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/x-pentax-pef,.jpg,.jpeg,.png,.webp,.gif,.pef" multiple hidden>
+          <div class="hint">ここにドラッグ＆ドロップ、または貼り付け（Ctrl/⌘+V）。複数まとめて追加できます</div>
+          <div class="formats"><span>JPG</span><span>PNG</span><span>WEBP</span><span>GIF</span><span>PEF</span></div>
+        </div>
+        <ul class="files" id="files"></ul>
+        <div class="batch" id="batchBox" hidden>
+          <fieldset class="bmodes">
+            <legend>一括変換する方式（複数選べます）</legend>
+            <label for="bm-color"><input type="checkbox" id="bm-color">カラー</label>
+            <label for="bm-mono"><input type="checkbox" id="bm-mono">白黒</label>
+            <label for="bm-embed"><input type="checkbox" id="bm-embed">埋め込み</label>
+          </fieldset>
+          <div class="batch-row">
+            <button type="button" class="primary" id="batchBtn">すべて変換</button>
+            <button type="button" id="zipBtn" disabled>ZIPで保存</button>
+          </div>
+          <div class="batch-prog" id="batchProg" hidden>
+            <progress id="batchBar" max="1" value="0"></progress>
+            <span id="batchText"></span>
+          </div>
+          <p class="batch-note" id="batchNote" hidden></p>
+        </div>
+      </section>
+
+      <section class="sec">
+        <h2>変換方式</h2>
+        <div class="seg" role="group" aria-label="変換方式">
+          <button type="button" data-mode="color" aria-pressed="true">カラー</button>
+          <button type="button" data-mode="mono" aria-pressed="false">白黒</button>
+          <button type="button" data-mode="embed" aria-pressed="false">埋め込み</button>
+        </div>
+        <p class="mode-note" id="modeNote"></p>
+      </section>
+
+      <section class="sec">
+        <label class="switch" for="limitToggle">
+          <span class="sw-text">
+            <strong>50KB以内に収める</strong>
+            <small>超えたときは解像度・色数などを自動で下げて変換し直します（50,000バイト以内）</small>
+          </span>
+          <input type="checkbox" role="switch" id="limitToggle">
+          <span class="sw-track" aria-hidden="true"><span class="sw-thumb"></span></span>
+        </label>
+      </section>
+
+      <section class="sec" id="secPreset">
+        <h2>プリセット</h2>
+        <div class="chips" id="presets">
+          <button type="button" data-preset="standard" aria-pressed="true">標準</button>
+          <button type="button" data-preset="logo" aria-pressed="false">ロゴ・イラスト</button>
+          <button type="button" data-preset="photo" aria-pressed="false">写真</button>
+          <button type="button" data-preset="smooth" aria-pressed="false">なめらか</button>
+          <button type="button" data-preset="poster" aria-pressed="false">ポスター調</button>
+        </div>
+      </section>
+
+      <section class="sec" id="secTune">
+        <h2>調整</h2>
+        <div class="ctl" data-for="color">
+          <label for="colors">色数 <output id="colorsOut"></output></label>
+          <input type="range" id="colors" min="2" max="64" step="1">
+        </div>
+        <div class="ctl" data-for="mono">
+          <label for="threshold">しきい値 <output id="thresholdOut"></output></label>
+          <input type="range" id="threshold" min="1" max="254" step="1">
+          <div class="ends"><span>黒が少ない</span><span>黒が多い</span></div>
+        </div>
+        <div class="ctl">
+          <label for="omit">ノイズ除去 <output id="omitOut"></output></label>
+          <input type="range" id="omit" min="0" max="64" step="1">
+          <div class="ends"><span>細部を残す</span><span>小さな点を消す</span></div>
+        </div>
+        <div class="ctl">
+          <label for="precision">線の単純化 <output id="precisionOut"></output></label>
+          <input type="range" id="precision" min="0.1" max="5" step="0.1">
+          <div class="ends"><span>形に忠実</span><span>なめらか・軽量</span></div>
+        </div>
+        <div class="ctl">
+          <label for="blur">ぼかし（前処理） <output id="blurOut"></output></label>
+          <input type="range" id="blur" min="0" max="5" step="1">
+        </div>
+        <div class="row">
+          <label for="maxSide">トレース解像度（長辺）</label>
+          <select id="maxSide">
+            <option value="500">500 px</option>
+            <option value="1000">1000 px</option>
+            <option value="1500">1500 px</option>
+            <option value="2000">2000 px</option>
+            <option value="0">元のサイズ</option>
+          </select>
+        </div>
+        <div class="row" data-for="mono">
+          <label for="ink">線の色</label>
+          <input type="color" id="ink">
+        </div>
+        <label class="check" data-for="mono">
+          <input type="checkbox" id="transparentBg">
+          <span>白い部分を透明にする<small>切り抜きやカッティング用に便利です</small></span>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="fillGaps">
+          <span>色の境目のすき間を埋める<small>図形どうしの間に出る細い白線を防ぎます</small></span>
+        </label>
+      </section>
+    </aside>
+
+    <!-- プレビュー -->
+    <main class="viewer">
+      <div class="bar">
+        <div class="tabs" role="group" aria-label="表示">
+          <button type="button" data-view="compare" aria-pressed="true">比較</button>
+          <button type="button" data-view="svg" aria-pressed="false">SVGのみ</button>
+          <button type="button" data-view="code" aria-pressed="false">コード</button>
+        </div>
+        <div class="zoom" role="group" aria-label="拡大率" id="zoomGroup">
+          <button type="button" data-zoom="1" aria-pressed="true">FIT</button>
+          <button type="button" data-zoom="2" aria-pressed="false">2×</button>
+          <button type="button" data-zoom="4" aria-pressed="false">4×</button>
+          <button type="button" data-zoom="8" aria-pressed="false">8×</button>
+        </div>
+      </div>
+
+      <div class="mat" id="mat">
+        <div class="mat-inner" id="matInner">
+          <div class="empty" id="empty" hidden>
+            <strong>画像を追加してください</strong>
+            <span>左のパネルから選ぶか、この画面に画像をドロップすると変換結果がここに表示されます。</span>
+          </div>
+          <div class="stage" id="stage" hidden>
+            <img class="layer orig" id="origImg" alt="元画像">
+            <img class="layer svg" id="svgImg" alt="変換後のSVG">
+            <div class="stage-labels" id="labels"><span>元画像</span><span>SVG</span></div>
+            <div class="divider" id="divider" role="slider" tabindex="0" aria-label="比較の境界" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+              <span class="grab"></span><span class="node"></span>
+            </div>
+          </div>
+        </div>
+        <div class="busy" id="busy" hidden><span class="spin"></span><span id="busyText">トレース中…</span></div>
+      </div>
+      <textarea id="code" readonly hidden spellcheck="false" aria-label="SVGコード"></textarea>
+
+      <p class="notice" id="notice" hidden></p>
+
+      <dl class="stats" id="stats">
+        <div class="stat"><dt>元画像</dt><dd id="sOrig">—</dd></div>
+        <div class="stat"><dt>SVG</dt><dd id="sSvg">—</dd></div>
+        <div class="stat"><dt>パス数</dt><dd id="sPaths">—</dd></div>
+        <div class="stat"><dt>色数</dt><dd id="sColors">—</dd></div>
+        <div class="stat"><dt>処理時間</dt><dd id="sTime">—</dd></div>
+      </dl>
+
+      <div class="actions">
+        <span class="fname" id="outName"></span>
+        <button type="button" id="copyBtn">コードをコピー</button>
+        <button type="button" class="primary" id="saveBtn">SVGを保存</button>
+      </div>
+    </main>
+  </div>
+</div>
+<div class="toast" id="toast" hidden role="status"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/imagetracerjs@1.2.6/imagetracer_v1.2.6.js"></script>
+<script>
+(function () {
+  'use strict';
+  const $ = (s) => document.querySelector(s);
+  const $$ = (s) => Array.from(document.querySelectorAll(s));
+
+  const ACCEPT = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+  const EXT = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' };
+
+  const PRESETS = {
+    standard: { colors: 16, omit: 8, precision: 1, blur: 0 },
+    logo: { colors: 8, omit: 8, precision: 1, blur: 0 },
+    photo: { colors: 32, omit: 2, precision: 0.5, blur: 1 },
+    smooth: { colors: 12, omit: 12, precision: 2.5, blur: 3 },
+    poster: { colors: 4, omit: 20, precision: 2, blur: 4 }
+  };
+
+  const settings = {
+    mode: 'color', preset: 'standard',
+    colors: 16, omit: 8, precision: 1, blur: 0, maxSide: 1000,
+    threshold: 128, ink: '#1c2321', transparentBg: true, fillGaps: true,
+    limit: false
+  };
+  try { settings.limit = localStorage.getItem('svgtrace.limit50') === '1'; } catch (err) { /* 保存領域なし */ }
+  const ui = { view: 'compare', zoom: 1, split: 50 };
+  const files = [];
+  let activeId = null;
+  let batch = null; // 一括変換の進行状況（実行中のみ）
+  let seq = 0;
+
+  /* ---------- SVG組み立て（Workerとメインスレッドで共用） ---------- */
+  function buildSVG(IT, imgd, options, meta) {
+    const td = IT.imagedataToTracedata(imgd, options);
+    const hex = (c) => '#' + [c.r, c.g, c.b].map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('');
+    const out = [];
+    let paths = 0, colors = 0;
+    for (let l = 0; l < td.layers.length; l++) {
+      const c = td.palette[l];
+      if (!c || c.a < 8) continue;
+      let fill;
+      if (meta.mono) {
+        const isWhite = (c.r + c.g + c.b) / 3 > 127;
+        if (isWhite && meta.transparentBg) continue;
+        fill = isWhite ? '#ffffff' : meta.ink;
+      } else {
+        fill = hex(c);
+      }
+      const ds = [];
+      const layer = td.layers[l];
+      for (let p = 0; p < layer.length; p++) {
+        if (layer[p].isholepath) continue;
+        const s = IT.svgpathstring(td, l, p, options);
+        const m = s && s.match(/ d="([^"]*)"/);
+        if (m && m[1].trim()) ds.push(m[1].trim());
+      }
+      if (!ds.length) continue;
+      paths += ds.length; colors++;
+      let attrs = 'fill="' + fill + '"';
+      if (c.a < 250 && !meta.mono) attrs += ' fill-opacity="' + (c.a / 255).toFixed(3) + '"';
+      if (meta.fillGaps && c.a >= 250) attrs += ' stroke="' + fill + '" stroke-width="0.8" stroke-linejoin="round"';
+      out.push('<path ' + attrs + ' d="' + ds.join(' ') + '"/>');
+    }
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + meta.outW + '" height="' + meta.outH +
+      '" viewBox="0 0 ' + td.width + ' ' + td.height + '">\n' + out.join('\n') + '\n</svg>\n';
+    return { svg: svg, paths: paths, colors: colors };
+  }
+
+  /* ---------- Worker ---------- */
+  let worker = null;
+  let workerOK = true;
+  let pending = null; // {id, resolve, reject}
+  function makeWorker() {
+    if (!window.ImageTracer || !workerOK) return null;
+    try {
+      const src =
+        'self.ImageTracer = new (' + window.ImageTracer.constructor.toString() + ')();\n' +
+        'var buildSVG = ' + buildSVG.toString() + ';\n' +
+        'self.onmessage = function (e) { var d = e.data; try { var r = buildSVG(self.ImageTracer, d.imgd, d.options, d.meta); self.postMessage({ id: d.id, result: r }); } catch (err) { self.postMessage({ id: d.id, error: String(err && err.message || err) }); } };';
+      const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+      const w = new Worker(url);
+      w.onmessage = (e) => {
+        if (!pending || e.data.id !== pending.id) return;
+        const p = pending; pending = null;
+        if (e.data.error) p.reject(new Error(e.data.error)); else p.resolve(e.data.result);
+      };
+      w.onerror = (e) => {
+        e.preventDefault();
+        workerOK = false;
+        if (pending) { const p = pending; pending = null; p.fallback(); }
+      };
+      return w;
+    } catch (err) { workerOK = false; return null; }
+  }
+  function cancelJob() {
+    if (pending) { pending.reject({ cancelled: true }); pending = null; }
+    if (worker) { worker.terminate(); worker = null; }
+  }
+  function runTrace(imgd, options, meta) {
+    cancelJob();
+    const id = ++seq;
+    const runMain = (resolve, reject) => {
+      setTimeout(() => {
+        try {
+          const copy = { width: imgd.width, height: imgd.height, data: new Uint8ClampedArray(imgd.data) };
+          resolve(buildSVG(window.ImageTracer, copy, options, meta));
+        } catch (err) { reject(err); }
+      }, 30);
+    };
+    return new Promise((resolve, reject) => {
+      worker = makeWorker();
+      if (!worker) { runMain(resolve, reject); return; }
+      pending = { id, resolve, reject, fallback: () => { worker = null; runMain(resolve, reject); } };
+      const data = new Uint8ClampedArray(imgd.data);
+      worker.postMessage({ id, imgd: { width: imgd.width, height: imgd.height, data }, options, meta }, [data.buffer]);
+    });
+  }
+
+  /* ---------- ユーティリティ ---------- */
+  function fmtBytes(n) {
+    if (n == null) return '—';
+    if (n < 1000) return n + ' B';
+    if (n < 1000000) return (n / 1000).toFixed(1) + ' KB';
+    return (n / 1000000).toFixed(2) + ' MB';
+  }
+  function typeLabel(t) { return ({ 'image/jpeg': 'JPG', 'image/png': 'PNG', 'image/webp': 'WEBP', 'image/gif': 'GIF', 'image/x-pentax-pef': 'PEF' })[t] || '?'; }
+  function baseName(n) { return (n || 'image').replace(/\.[^.]+$/, '') || 'image'; }
+  function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
+  let toastTimer = null;
+  function toast(msg) {
+    const t = $('#toast'); t.textContent = msg; t.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+  }
+  function notice(msg, kind) {
+    const n = $('#notice');
+    if (!msg) { n.hidden = true; return; }
+    if (kind === true) kind = 'err';
+    n.textContent = msg; n.className = 'notice' + (kind ? ' ' + kind : ''); n.hidden = false;
+  }
+  function loadImage(src) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('decode'));
+      img.src = src;
+    });
+  }
+  function fileToDataURL(blob) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(blob);
+    });
+  }
+
+  /* ---------- サンプル画像（初回表示用） ---------- */
+  function drawSample() {
+    const c = document.createElement('canvas');
+    c.width = 720; c.height = 480;
+    const g = c.getContext('2d');
+    const poly = (pts) => { g.beginPath(); g.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]); g.closePath(); g.fill(); };
+    const sky = g.createLinearGradient(0, 0, 0, 320);
+    sky.addColorStop(0, '#f6d27e'); sky.addColorStop(1, '#ef8d63');
+    g.fillStyle = sky; g.fillRect(0, 0, 720, 480);
+    g.fillStyle = '#fff1cc'; g.beginPath(); g.arc(492, 200, 74, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#d0686a'; poly([[0, 300], [110, 214], [210, 268], [336, 160], [470, 286], [596, 212], [720, 284], [720, 480], [0, 480]]);
+    g.fillStyle = '#86405f'; poly([[0, 362], [96, 298], [206, 350], [318, 276], [436, 362], [566, 314], [720, 372], [720, 480], [0, 480]]);
+    g.fillStyle = '#3b2849'; g.fillRect(0, 404, 720, 76);
+    g.fillStyle = '#fff1cc';
+    for (let i = 0; i < 4; i++) { const w = 120 - i * 26; g.beginPath(); g.roundRect ? g.roundRect(492 - w / 2, 420 + i * 14, w, 5, 3) : g.rect(492 - w / 2, 420 + i * 14, w, 5); g.fill(); }
+    g.strokeStyle = '#3b2849'; g.lineWidth = 4; g.lineCap = 'round'; g.lineJoin = 'round';
+    [[180, 110, 1], [232, 136, .75], [140, 150, .6]].forEach(([x, y, s]) => {
+      g.beginPath(); g.moveTo(x - 22 * s, y - 6 * s); g.quadraticCurveTo(x - 10 * s, y - 14 * s, x, y);
+      g.quadraticCurveTo(x + 10 * s, y - 14 * s, x + 22 * s, y - 6 * s); g.stroke();
+    });
+    return c;
+  }
+  async function addSample() {
+    const c = drawSample();
+    const dataURL = c.toDataURL('image/png');
+    const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+    const img = await loadImage(dataURL);
+    const entry = { id: 'f' + (++seq), name: 'sample-sunset.png', type: 'image/png', size: blob ? blob.size : null, src: dataURL, dataURL, img, w: img.naturalWidth, h: img.naturalHeight, sample: true, result: null };
+    files.push(entry);
+    return entry;
+  }
+
+  /* ---------- PEF（PENTAX RAW）：内蔵プレビューJPEGの取り出し ---------- */
+  const PEF_TYPE = 'image/x-pentax-pef';
+  function isPef(f) {
+    const ext = ((f.name || '').split('.').pop() || '').toLowerCase();
+    return ext === 'pef' || f.type === PEF_TYPE;
+  }
+  // start位置のJPEGをマーカー単位でたどり、長さ・サイズ・方式を返す（壊れていればnull）
+  function scanJpeg(u8, start) {
+    const n = u8.length;
+    let pos = start + 2, w = 0, h = 0, sof = -1, exifOrient = 0;
+    for (let guard = 0; guard < 10000; guard++) {
+      if (pos + 1 >= n || u8[pos] !== 0xFF) return null;
+      while (pos < n && u8[pos] === 0xFF) pos++;
+      if (pos >= n) return null;
+      const m = u8[pos++];
+      if (m === 0xD9) return (w && h) ? { off: start, len: pos - start, w, h, sof, exifOrient } : null;
+      if (m === 0x01 || (m >= 0xD0 && m <= 0xD7)) continue;
+      if (pos + 1 >= n) return null;
+      const seg = (u8[pos] << 8) | u8[pos + 1];
+      if (seg < 2 || pos + seg > n) return null;
+      if (m >= 0xC0 && m <= 0xCF && m !== 0xC4 && m !== 0xC8 && m !== 0xCC && seg >= 7) {
+        sof = m; h = (u8[pos + 3] << 8) | u8[pos + 4]; w = (u8[pos + 5] << 8) | u8[pos + 6];
+      } else if (m === 0xE1 && seg > 20 && u8[pos + 2] === 0x45 && u8[pos + 3] === 0x78 && u8[pos + 4] === 0x69 && u8[pos + 5] === 0x66) {
+        exifOrient = readTiffOrientation(u8, pos + 8) || 0;
+      }
+      pos += seg;
+      if (m === 0xDA) {
+        // エントロピー符号化データを次のマーカーまで読み飛ばす
+        while (pos + 1 < n) {
+          if (u8[pos] === 0xFF) {
+            const nx = u8[pos + 1];
+            if (nx !== 0x00 && !(nx >= 0xD0 && nx <= 0xD7) && nx !== 0xFF) break;
+          }
+          pos++;
+        }
+      }
+    }
+    return null;
+  }
+  // TIFF（PEF本体やExif）のIFD0から向き（Orientation）を読む
+  function readTiffOrientation(u8, base) {
+    try {
+      const le = u8[base] === 0x49 && u8[base + 1] === 0x49;
+      const be = u8[base] === 0x4D && u8[base + 1] === 0x4D;
+      if (!le && !be) return 0;
+      const dv = new DataView(u8.buffer, u8.byteOffset);
+      if (dv.getUint16(base + 2, le) !== 42) return 0;
+      const ifd = base + dv.getUint32(base + 4, le);
+      const cnt = dv.getUint16(ifd, le);
+      for (let i = 0; i < cnt && i < 500; i++) {
+        const e = ifd + 2 + i * 12;
+        if (dv.getUint16(e, le) === 0x0112) return dv.getUint16(e + 8, le);
+      }
+    } catch (err) { /* 読めなければ向き補正なし */ }
+    return 0;
+  }
+  async function extractPefPreview(file) {
+    const u8 = new Uint8Array(await file.arrayBuffer());
+    const isTiff = (u8[0] === 0x49 && u8[1] === 0x49 && u8[2] === 0x2A) || (u8[0] === 0x4D && u8[1] === 0x4D && u8[3] === 0x2A);
+    if (!isTiff) throw new Error('notpef');
+    const fileOrient = readTiffOrientation(u8, 0);
+    const cands = [];
+    for (let i = 8; i < u8.length - 4; i++) {
+      if (u8[i] !== 0xFF || u8[i + 1] !== 0xD8 || u8[i + 2] !== 0xFF) continue;
+      const j = scanJpeg(u8, i);
+      if (!j) continue;
+      if (j.sof === 0xC0 || j.sof === 0xC1 || j.sof === 0xC2) cands.push(j); // 可逆JPEG（RAW本体）は除外
+      i += j.len - 1;
+    }
+    cands.sort((a, b) => b.w * b.h - a.w * a.h);
+    for (const c of cands.slice(0, 6)) {
+      const blob = new Blob([u8.subarray(c.off, c.off + c.len)], { type: 'image/jpeg' });
+      const url = URL.createObjectURL(blob);
+      try {
+        const img = await loadImage(url);
+        // JPEG自身のExifに回転指定があればブラウザが補正する。無ければPEF本体の向きで回転する
+        const orient = c.exifOrient > 1 ? 1 : fileOrient;
+        if (orient === 3 || orient === 6 || orient === 8) {
+          const rot = orient === 6 || orient === 8;
+          const cv = document.createElement('canvas');
+          cv.width = rot ? img.naturalHeight : img.naturalWidth;
+          cv.height = rot ? img.naturalWidth : img.naturalHeight;
+          const ctx = cv.getContext('2d');
+          ctx.translate(cv.width / 2, cv.height / 2);
+          ctx.rotate(orient === 3 ? Math.PI : orient === 6 ? Math.PI / 2 : -Math.PI / 2);
+          ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+          const rb = await canvasBlob(cv, 'image/jpeg', 0.92);
+          URL.revokeObjectURL(url);
+          if (rb) {
+            const rurl = URL.createObjectURL(rb);
+            return { blob: rb, url: rurl, img: await loadImage(rurl) };
+          }
+          return { blob, url: URL.createObjectURL(blob), img };
+        }
+        return { blob, url, img };
+      } catch (err) {
+        URL.revokeObjectURL(url);
+      }
+    }
+    throw new Error('nopreview');
+  }
+
+  /* ---------- ファイル追加 ---------- */
+  async function addFiles(list) {
+    const arr = Array.from(list || []);
+    if (!arr.length) return;
+    if (batch) { toast('一括変換の実行中は画像を追加できません。終わってから追加してください'); return; }
+    let firstNew = null, rejected = [];
+    for (const f of arr) {
+      if (isPef(f)) {
+        $('#busyText').textContent = 'PEFからプレビュー画像を取り出し中…';
+        $('#busy').hidden = false;
+        try {
+          const pv = await extractPefPreview(f);
+          const entry = { id: 'f' + (++seq), name: f.name || 'image.pef', type: PEF_TYPE, size: f.size, file: pv.blob, src: pv.url, dataURL: null, img: pv.img, w: pv.img.naturalWidth, h: pv.img.naturalHeight, hasAlpha: false, pef: true, result: null };
+          files.push(entry);
+          if (!firstNew) firstNew = entry;
+        } catch (err) {
+          rejected.push((f.name || 'PEF') + '（プレビュー画像が見つかりません）');
+        }
+        $('#busy').hidden = true;
+        continue;
+      }
+      let type = f.type;
+      if (!ACCEPT.includes(type)) { const ext = (f.name.split('.').pop() || '').toLowerCase(); type = EXT[ext] || type; }
+      if (!ACCEPT.includes(type)) { rejected.push(f.name || 'ファイル'); continue; }
+      const src = URL.createObjectURL(f);
+      try {
+        const img = await loadImage(src);
+        const entry = { id: 'f' + (++seq), name: f.name || ('pasted.' + typeLabel(type).toLowerCase()), type, size: f.size, file: f, src, dataURL: null, img, w: img.naturalWidth, h: img.naturalHeight, result: null };
+        files.push(entry);
+        if (!firstNew) firstNew = entry;
+      } catch (err) {
+        URL.revokeObjectURL(src);
+        rejected.push((f.name || '画像') + '（読み込み失敗）');
+      }
+    }
+    // 最初の実ファイルが入ったらサンプルは外す
+    const sampleIdx = files.findIndex((x) => x.sample);
+    if (firstNew && sampleIdx >= 0) removeFile(files[sampleIdx].id, true);
+    renderFiles();
+    if (rejected.length) toast('変換できない形式です：' + rejected.slice(0, 3).join('、') + (rejected.length > 3 ? ' ほか' : '') + '（JPG・PNG・WEBP・GIF・PEFに対応）');
+    if (firstNew) select(firstNew.id);
+  }
+  function removeFile(id, silent) {
+    const i = files.findIndex((x) => x.id === id);
+    if (i < 0) return;
+    const f = files[i];
+    if (f.src && f.src.startsWith('blob:')) URL.revokeObjectURL(f.src);
+    Object.values(f.cache || {}).forEach((r) => { if (r.url) URL.revokeObjectURL(r.url); });
+    files.splice(i, 1);
+    if (silent) return;
+    if (activeId === id) {
+      activeId = null;
+      const next = files[Math.min(i, files.length - 1)];
+      renderFiles();
+      if (next) select(next.id); else showEmpty();
+    } else renderFiles();
+  }
+
+  function renderFiles() {
+    const ul = $('#files');
+    ul.innerHTML = files.map((f) =>
+      '<li data-id="' + f.id + '" aria-current="' + (f.id === activeId) + '" tabindex="0">' +
+      '<img class="thumb" alt="" src="' + esc(f.src) + '">' +
+      '<div style="min-width:0"><div class="nm">' + esc(f.name) + (f.sample ? '<span class="badge">サンプル</span>' : '') + '</div>' +
+      '<div class="meta">' + typeLabel(f.type) + ' · ' + f.w + '×' + f.h + ' · ' + fmtBytes(f.size) + '</div>' +
+      statusChip(f) + '</div>' +
+      '<button type="button" class="rm" data-rm="' + f.id + '" aria-label="' + esc(f.name) + ' を削除">×</button></li>'
+    ).join('');
+    $('#fileCount').textContent = files.length ? files.length + '件' : '';
+    updateBatchUI();
+  }
+  const MODES = ['color', 'mono', 'embed'];
+  const MODE_LABEL = { color: 'カラー', mono: '白黒', embed: '埋込' };
+  function statusChip(f) {
+    const chips = [];
+    if (f.state === 'busy') chips.push('<span class="st busy">' + (f.busyMode ? MODE_LABEL[f.busyMode] + ' ' : '') + '変換中…</span>');
+    else if (f.state === 'queued') chips.push('<span class="st">待機中</span>');
+    else if (f.state === 'error') chips.push('<span class="st err">一部失敗</span>');
+    MODES.forEach((m) => {
+      const r = resultFor(f, m);
+      if (!r) return;
+      const over = settings.limit && r.bytes > LIMIT;
+      chips.push('<span class="st ' + (over ? 'err' : 'ok') + '">' + MODE_LABEL[m] + ' ' + fmtBytes(r.bytes) + (over ? ' 超過' : '') + '</span>');
+    });
+    return chips.length ? '<div class="stline">' + chips.join(' ') + '</div>' : '';
+  }
+
+  /* ---------- 選択と変換 ---------- */
+  function select(id) {
+    activeId = id;
+    renderFiles();
+    const f = active();
+    if (!f) { showEmpty(); return; }
+    $('#empty').hidden = true;
+    $('#stage').hidden = ui.view === 'code';
+    $('#origImg').src = f.src;
+    layoutStage();
+    convert();
+  }
+  function active() { return files.find((x) => x.id === activeId) || null; }
+
+  // 方式ごとの設定キー（同じキーの結果は使い回す）
+  function settingsKey(mode) {
+    const s = settings;
+    mode = mode || s.mode;
+    if (mode === 'embed') return 'embed|' + s.limit;
+    const common = [mode, s.omit, s.precision, s.blur, s.maxSide, s.fillGaps, s.limit];
+    if (mode === 'mono') common.push(s.threshold, s.ink, s.transparentBg);
+    else common.push(s.colors);
+    return common.join('|');
+  }
+  function resultFor(f, mode) { return (f.cache && f.cache[settingsKey(mode)]) || null; }
+  function cur(f) { return f ? resultFor(f, settings.mode) : null; }
+
+  let convertTimer = null;
+  function scheduleConvert() { clearTimeout(convertTimer); convertTimer = setTimeout(convert, 280); }
+
+  const LIB_ERROR = '変換ライブラリを読み込めませんでした。ネットワーク接続を確認してページを再読み込みしてください。「埋め込み」方式はこのままでも使えます。';
+
+  // 1枚分の変換結果を作る（表示はしない）
+  async function computeResult(f, mode, gen) {
+    const started = performance.now();
+    const key = settingsKey(mode);
+    let res;
+    if (mode === 'embed') {
+      res = await embedFit(f, gen);
+    } else {
+      if (!window.ImageTracer) throw new Error('lib');
+      res = await traceFit(f, gen, mode);
+    }
+    const blob = new Blob([res.svg], { type: 'image/svg+xml' });
+    return Object.assign(res, { key, mode, bytes: blob.size, url: URL.createObjectURL(blob), ms: performance.now() - started });
+  }
+  // 結果を保存し、どの方式の現在の設定にも当てはまらない古い結果は捨てる
+  function storeResult(f, res) {
+    f.cache = f.cache || {};
+    const old = f.cache[res.key];
+    if (old && old !== res && old.url) URL.revokeObjectURL(old.url);
+    f.cache[res.key] = res;
+    const live = new Set(MODES.map((m) => settingsKey(m)));
+    Object.keys(f.cache).forEach((k) => {
+      if (!live.has(k)) { if (f.cache[k].url) URL.revokeObjectURL(f.cache[k].url); delete f.cache[k]; }
+    });
+  }
+
+  async function convert() {
+    const f = active();
+    if (!f) return;
+    if (batch) {
+      // 一括変換中は、変換済みなら表示するだけ
+      if (cur(f)) showResult(f);
+      else if (f.state !== 'busy') { $('#svgImg').removeAttribute('src'); notice('一括変換の順番を待っています。'); }
+      return;
+    }
+    cancelJob();
+    const gen = ++convertGen;
+    if (cur(f)) { showResult(f); return; }
+    notice('');
+    $('#busyText').textContent = settings.mode === 'embed' ? '埋め込み中…' : 'トレース中…';
+    $('#busy').hidden = false;
+    try {
+      const res = await computeResult(f, settings.mode, gen);
+      if (gen !== convertGen) { URL.revokeObjectURL(res.url); return; }
+      storeResult(f, res);
+      f.state = '';
+      renderFiles();
+      if (active() === f) showResult(f);
+    } catch (err) {
+      if (err && err.cancelled) return;
+      $('#busy').hidden = true;
+      if (err && err.message === 'lib') notice(LIB_ERROR, true);
+      else notice('変換に失敗しました。トレース解像度を下げるか、色数を減らしてもう一度お試しください。', true);
+    }
+  }
+
+  /* ---------- トレース本体と50KB調整 ---------- */
+  const LIMIT = 50000; // 50KB（50,000バイト）
+  let convertGen = 0;
+  const cancelled = () => ({ cancelled: true });
+  const svgBytes = (s) => new Blob([s]).size;
+
+  // 解析用の画像データを作る。白黒は（必要ならぼかしてから）二値化する
+  function prepareImageData(f, p) {
+    const scale = Math.min(1, p.side / Math.max(f.w, f.h));
+    const tw = Math.max(1, Math.round(f.w * scale)), th = Math.max(1, Math.round(f.h * scale));
+    const cv = document.createElement('canvas'); cv.width = tw; cv.height = th;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.imageSmoothingQuality = 'high';
+    const mono = p.mode === 'mono';
+    if (mono) {
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, tw, th);
+      if (p.blur > 0) ctx.filter = 'grayscale(1) blur(' + (p.blur * 0.6) + 'px)';
+    }
+    ctx.drawImage(f.img, 0, 0, tw, th);
+    ctx.filter = 'none';
+    const imgd = ctx.getImageData(0, 0, tw, th);
+    if (mono) {
+      const d = imgd.data, t = p.threshold;
+      for (let i = 0; i < d.length; i += 4) {
+        const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        const v = lum >= t ? 255 : 0;
+        d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255;
+      }
+    }
+    return { imgd, tw, th };
+  }
+
+  async function traceOnce(f, p, gen) {
+    if (gen !== convertGen) throw cancelled();
+    const { imgd, tw, th } = prepareImageData(f, p);
+    const mono = p.mode === 'mono';
+    const options = {
+      ltres: p.precision, qtres: p.precision, pathomit: p.omit,
+      rightangleenhance: true, colorsampling: 2, numberofcolors: p.colors,
+      mincolorratio: 0, colorquantcycles: 3, layering: 0, strokewidth: 1,
+      linefilter: false, scale: 1, roundcoords: p.round, viewbox: true, desc: false,
+      lcpr: 0, qcpr: 0, blurradius: mono ? 0 : p.blur, blurdelta: 20
+    };
+    if (mono) {
+      options.pal = [{ r: 0, g: 0, b: 0, a: 255 }, { r: 255, g: 255, b: 255, a: 255 }];
+      options.numberofcolors = 2; options.colorquantcycles = 1;
+    }
+    const meta = { mono, ink: settings.ink, transparentBg: settings.transparentBg, fillGaps: settings.fillGaps, outW: f.w, outH: f.h };
+    const r = await runTrace(imgd, options, meta);
+    if (gen !== convertGen) throw cancelled();
+    return { svg: r.svg, paths: r.paths, colors: r.colors, tracedW: tw, tracedH: th, bytes: svgBytes(r.svg), p: Object.assign({}, p) };
+  }
+
+  // 50KBを超えたら、座標の丸め → 解像度・色数・ノイズ除去・単純化 の順で段階的に軽くして再トレース
+  async function traceFit(f, gen, mode) {
+    const full = Math.max(f.w, f.h);
+    const p = {
+      mode: mode, colors: settings.colors, omit: settings.omit, precision: settings.precision,
+      blur: settings.blur, threshold: settings.threshold, round: 1,
+      side: settings.maxSide > 0 ? Math.min(settings.maxSide, full) : full
+    };
+    const first = await traceOnce(f, p, gen);
+    if (!settings.limit || first.bytes <= LIMIT) return first;
+    let best = first, last = first, tries = 1;
+    while (tries < 12 && last.bytes > LIMIT) {
+      if (p.round === 1) {
+        p.round = 0;
+      } else {
+        const k = Math.max(0.45, Math.min(0.88, 0.95 / Math.sqrt(last.bytes / LIMIT)));
+        p.side = Math.max(48, Math.round(p.side * k));
+        if (p.mode === 'color') p.colors = Math.max(2, Math.round(p.colors * Math.max(0.6, k)));
+        p.omit = Math.min(200, Math.max(p.omit + 4, Math.round(p.omit * 1.3)));
+        p.precision = Math.min(8, Math.round((p.precision + 0.5) * 10) / 10);
+      }
+      tries++;
+      $('#busyText').textContent = '50KBに収まるよう調整中…（' + tries + '回目）';
+      last = await traceOnce(f, p, gen);
+      if (last.bytes < best.bytes) best = last;
+    }
+    best.fit = { kind: 'trace', from: first.p, firstBytes: first.bytes, tries, ok: best.bytes <= LIMIT };
+    return best;
+  }
+
+  function embedSVG(w, h, href) {
+    return '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">\n' +
+      '<image width="' + w + '" height="' + h + '" xlink:href="' + href + '"/>\n</svg>\n';
+  }
+  function canvasBlob(cv, type, q) { return new Promise((r) => cv.toBlob(r, type, q)); }
+  function imageHasAlpha(f) {
+    if (f.hasAlpha != null) return f.hasAlpha;
+    if (f.type === 'image/jpeg') return (f.hasAlpha = false);
+    const s = Math.min(1, 256 / Math.max(f.w, f.h));
+    const cv = document.createElement('canvas');
+    cv.width = Math.max(1, Math.round(f.w * s)); cv.height = Math.max(1, Math.round(f.h * s));
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(f.img, 0, 0, cv.width, cv.height);
+    const d = ctx.getImageData(0, 0, cv.width, cv.height).data;
+    for (let i = 3; i < d.length; i += 4) if (d[i] < 250) return (f.hasAlpha = true);
+    return (f.hasAlpha = false);
+  }
+
+  // 埋め込み方式：50KBを超えたらWEBP（非対応ならJPEG/PNG）に再圧縮し、品質→サイズの順に下げる
+  async function embedFit(f, gen) {
+    if (!f.dataURL) f.dataURL = await fileToDataURL(f.file);
+    const svg0 = embedSVG(f.w, f.h, f.dataURL);
+    const first = { svg: svg0, bytes: svgBytes(svg0), paths: 0, colors: null, tracedW: f.w, tracedH: f.h };
+    if (!settings.limit || first.bytes <= LIMIT) return first;
+    const alpha = imageHasAlpha(f);
+    let scale = Math.min(1, 1600 / Math.max(f.w, f.h)), q = 0.85, tries = 0, best = null;
+    while (tries < 24) {
+      if (gen !== convertGen) throw cancelled();
+      tries++;
+      $('#busyText').textContent = '50KBに収まるよう再圧縮中…（' + tries + '回目）';
+      const tw = Math.max(8, Math.round(f.w * scale)), th = Math.max(8, Math.round(f.h * scale));
+      const cv = document.createElement('canvas'); cv.width = tw; cv.height = th;
+      const ctx = cv.getContext('2d');
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(f.img, 0, 0, tw, th);
+      let blob = await canvasBlob(cv, 'image/webp', q), fmt = 'WEBP';
+      if (!blob || blob.type !== 'image/webp') {
+        if (alpha) { blob = await canvasBlob(cv, 'image/png'); fmt = 'PNG'; }
+        else {
+          ctx.globalCompositeOperation = 'destination-over';
+          ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, tw, th);
+          blob = await canvasBlob(cv, 'image/jpeg', q); fmt = 'JPEG';
+        }
+      }
+      if (!blob) break;
+      const svg = embedSVG(f.w, f.h, await fileToDataURL(blob));
+      const cur = { svg, bytes: svgBytes(svg), paths: 0, colors: null, tracedW: tw, tracedH: th, enc: { fmt, q: fmt === 'PNG' ? null : q, w: tw, h: th } };
+      if (!best || cur.bytes < best.bytes) best = cur;
+      if (cur.bytes <= LIMIT) break;
+      if (fmt !== 'PNG' && q > 0.5) q = Math.round((q - 0.15) * 100) / 100;
+      else scale *= Math.max(0.5, Math.min(0.85, Math.sqrt(LIMIT / cur.bytes)));
+    }
+    if (gen !== convertGen) throw cancelled();
+    if (!best) return first;
+    best.fit = { kind: 'embed', firstBytes: first.bytes, tries, ok: best.bytes <= LIMIT };
+    return best;
+  }
+
+  function fitMessage(f, r) {
+    const fit = r.fit;
+    if (!fit) return '';
+    if (!fit.ok) {
+      return '50KB以内に収まりませんでした（最小 ' + fmtBytes(r.bytes) + '）。' +
+        (fit.kind === 'trace' ? '細かい写真などは「埋め込み」方式のほうが小さくなることがあります。' : '画像が大きすぎるため、事前に縮小してからお試しください。');
+    }
+    const head = '50KBを超えたため自動で調整しました（' + fmtBytes(fit.firstBytes) + ' → ' + fmtBytes(r.bytes) + '）。';
+    if (fit.kind === 'embed') {
+      const e = r.enc;
+      return head + '画像を' + e.fmt + (e.q != null ? '・品質' + Math.round(e.q * 100) + '%' : '') + '・' + e.w + '×' + e.h + 'px に再圧縮しています。';
+    }
+    const a = fit.from, b = r.p, parts = [];
+    if (b.round !== a.round) parts.push('座標を整数に丸め');
+    if (b.side !== a.side) parts.push('解析解像度 ' + a.side + '→' + b.side + 'px');
+    if (b.colors !== a.colors && b.mode === 'color') parts.push('色数 ' + a.colors + '→' + b.colors);
+    if (b.omit !== a.omit) parts.push('ノイズ除去 ' + a.omit + '→' + b.omit + 'px');
+    if (b.precision !== a.precision) parts.push('単純化 ' + a.precision.toFixed(1) + '→' + b.precision.toFixed(1));
+    return head + parts.join('、') + '。';
+  }
+
+  function showResult(f, r) {
+    r = r || cur(f);
+    if (!r) return;
+    $('#busy').hidden = true;
+    $('#svgImg').src = r.url;
+    $('#sOrig').innerHTML = fmtBytes(f.size) + '<small>' + f.w + '×' + f.h + '</small>';
+    let ratio = '';
+    if (settings.limit) {
+      ratio = r.bytes <= LIMIT ? '<small class="down">✓ 50KB以内</small>' : '<small class="up">50KB超</small>';
+    } else if (f.size) {
+      const k = r.bytes / f.size;
+      ratio = '<small class="' + (k > 1 ? 'up' : 'down') + '">' + (k >= 10 ? Math.round(k) + '倍' : (k * 100).toFixed(0) + '%') + '</small>';
+    }
+    $('#sSvg').innerHTML = fmtBytes(r.bytes) + ratio;
+    $('#sPaths').textContent = r.mode === 'embed' ? '— (画像)' : r.paths.toLocaleString();
+    $('#sColors').innerHTML = r.colors == null ? '—' : r.colors + (r.tracedW !== f.w ? '<small>' + r.tracedW + '×' + r.tracedH + 'で解析</small>' : '');
+    $('#sTime').textContent = r.ms < 1000 ? Math.round(r.ms) + ' ms' : (r.ms / 1000).toFixed(1) + ' s';
+    $('#outName').textContent = baseName(f.name) + '.svg';
+    if (ui.view === 'code') $('#code').value = r.svg;
+    const tips = [];
+    const fitMsg = fitMessage(f, r);
+    if (fitMsg) tips.push(fitMsg);
+    if (f.type === 'image/gif') tips.push('GIFアニメは最初のコマだけを変換します。');
+    if (f.pef) tips.push('PEFはRAWデータを現像せず、ファイルに記録されたプレビューJPEG（' + f.w + '×' + f.h + 'px）を変換しています。');
+    if (r.mode !== settings.mode) tips.push('一括変換中：「' + MODE_LABEL[r.mode] + '」方式の結果を表示しています。');
+    if (!settings.limit && r.mode !== 'embed' && r.bytes > 3000000) tips.push('SVGが大きくなっています。色数を減らすか、ノイズ除去を上げるか、トレース解像度を下げると軽くなります。');
+    if (r.mode !== 'embed' && r.paths === 0) tips.push('図形が見つかりませんでした。白黒方式ならしきい値を、カラー方式ならノイズ除去を下げてみてください。');
+    notice(tips.join(' '), r.fit && !r.fit.ok ? 'err' : (r.fit ? 'ok' : ''));
+    $('#saveBtn').disabled = false; $('#copyBtn').disabled = false;
+  }
+
+  function showEmpty() {
+    cancelJob();
+    convertGen++;
+    $('#busy').hidden = true;
+    $('#stage').hidden = true;
+    $('#empty').hidden = ui.view === 'code';
+    $('#code').value = '';
+    ['#sOrig', '#sSvg', '#sPaths', '#sColors', '#sTime'].forEach((s) => { $(s).textContent = '—'; });
+    $('#outName').textContent = '';
+    $('#saveBtn').disabled = true; $('#copyBtn').disabled = true;
+    notice('');
+    renderFiles();
+  }
+
+  /* ---------- ステージ（比較表示） ---------- */
+  function layoutStage() {
+    const f = active();
+    if (!f) return;
+    const mat = $('#mat');
+    const availW = Math.max(100, mat.clientWidth - 48), availH = Math.max(100, mat.clientHeight - 48);
+    const fit = Math.min(availW / f.w, availH / f.h);
+    const s = fit * ui.zoom;
+    const stage = $('#stage');
+    stage.style.width = Math.round(f.w * s) + 'px';
+    stage.style.height = Math.round(f.h * s) + 'px';
+    stage.classList.toggle('pix', s > 1.5);
+    applySplit();
+  }
+  function applySplit() {
+    const compare = ui.view === 'compare';
+    $('#svgImg').style.clipPath = compare ? 'inset(0 0 0 ' + ui.split + '%)' : 'none';
+    $('#origImg').hidden = !compare;
+    $('#divider').hidden = !compare;
+    $('#labels').hidden = !compare;
+    $('#divider').style.left = ui.split + '%';
+    $('#divider').setAttribute('aria-valuenow', Math.round(ui.split));
+  }
+  (function setupDivider() {
+    const dv = $('#divider'), stage = $('#stage');
+    let dragging = false;
+    const move = (e) => {
+      const r = stage.getBoundingClientRect();
+      ui.split = Math.max(0, Math.min(100, ((e.clientX - r.left) / r.width) * 100));
+      applySplit();
+    };
+    dv.addEventListener('pointerdown', (e) => { dragging = true; dv.setPointerCapture(e.pointerId); move(e); e.preventDefault(); });
+    dv.addEventListener('pointermove', (e) => { if (dragging) move(e); });
+    dv.addEventListener('pointerup', () => { dragging = false; });
+    dv.addEventListener('pointercancel', () => { dragging = false; });
+    stage.addEventListener('click', (e) => { if (ui.view === 'compare' && e.target !== dv && !dv.contains(e.target)) move(e); });
+    dv.addEventListener('keydown', (e) => {
+      const step = e.shiftKey ? 10 : 2;
+      if (e.key === 'ArrowLeft') ui.split = Math.max(0, ui.split - step);
+      else if (e.key === 'ArrowRight') ui.split = Math.min(100, ui.split + step);
+      else if (e.key === 'Home') ui.split = 0;
+      else if (e.key === 'End') ui.split = 100;
+      else return;
+      e.preventDefault(); applySplit();
+    });
+  })();
+
+  /* ---------- 設定UI ---------- */
+  const MODE_NOTES = {
+    color: '色ごとに輪郭をなぞってパスにします。ロゴ・イラスト・アイコン向きです。',
+    mono: '明るさで白と黒に分けてからなぞります。線画・手書き文字・スタンプ・カッティング用に。',
+    embed: '画像をそのままSVGの中に入れます。見た目は変わりませんが、拡大すると元画像と同じくぼやけます。'
+  };
+  function syncControls() {
+    $$('.seg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === settings.mode)));
+    $$('#presets button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.preset === settings.preset)));
+    $('#modeNote').textContent = MODE_NOTES[settings.mode];
+    $('#secPreset').hidden = settings.mode !== 'color';
+    $('#secTune').hidden = settings.mode === 'embed';
+    $$('[data-for]').forEach((el) => { el.hidden = el.dataset.for !== settings.mode; });
+    $('#colors').value = settings.colors; $('#colorsOut').textContent = settings.colors + '色';
+    $('#threshold').value = settings.threshold; $('#thresholdOut').textContent = settings.threshold;
+    $('#omit').value = settings.omit; $('#omitOut').textContent = settings.omit === 0 ? 'なし' : settings.omit + ' px未満';
+    $('#precision').value = settings.precision; $('#precisionOut').textContent = Number(settings.precision).toFixed(1);
+    $('#blur').value = settings.blur; $('#blurOut').textContent = settings.blur === 0 ? 'なし' : settings.blur;
+    $('#maxSide').value = String(settings.maxSide);
+    $('#ink').value = settings.ink;
+    $('#transparentBg').checked = settings.transparentBg;
+    $('#fillGaps').checked = settings.fillGaps;
+    $('#limitToggle').checked = settings.limit;
+    renderFiles();
+    $('#zoomGroup').hidden = ui.view === 'code';
+  }
+
+  $$('.seg button').forEach((b) => b.addEventListener('click', () => {
+    settings.mode = b.dataset.mode; syncControls(); convert();
+  }));
+  $$('#presets button').forEach((b) => b.addEventListener('click', () => {
+    settings.preset = b.dataset.preset; Object.assign(settings, PRESETS[settings.preset]); syncControls(); convert();
+  }));
+  const bindRange = (id, key, toVal, presetBreaking) => {
+    $('#' + id).addEventListener('input', (e) => {
+      settings[key] = toVal(e.target.value);
+      if (presetBreaking) settings.preset = '';
+      syncControls(); scheduleConvert();
+    });
+  };
+  bindRange('colors', 'colors', Number, true);
+  bindRange('omit', 'omit', Number, true);
+  bindRange('precision', 'precision', Number, true);
+  bindRange('blur', 'blur', Number, true);
+  bindRange('threshold', 'threshold', Number, false);
+  $('#maxSide').addEventListener('change', (e) => { settings.maxSide = Number(e.target.value); convert(); });
+  $('#ink').addEventListener('input', (e) => { settings.ink = e.target.value; scheduleConvert(); });
+  $('#transparentBg').addEventListener('change', (e) => { settings.transparentBg = e.target.checked; convert(); });
+  $('#fillGaps').addEventListener('change', (e) => { settings.fillGaps = e.target.checked; convert(); });
+  $('#limitToggle').addEventListener('change', (e) => {
+    settings.limit = e.target.checked;
+    try { localStorage.setItem('svgtrace.limit50', settings.limit ? '1' : '0'); } catch (err) { /* 保存領域なし */ }
+    convert();
+  });
+
+  $$('.tabs button').forEach((b) => b.addEventListener('click', () => {
+    ui.view = b.dataset.view;
+    $$('.tabs button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    const code = ui.view === 'code';
+    $('#mat').hidden = code; $('#code').hidden = !code;
+    const f = active();
+    if (code && cur(f)) $('#code').value = cur(f).svg;
+    if (!code) { $('#stage').hidden = !f; $('#empty').hidden = !!f; layoutStage(); }
+    syncControls();
+  }));
+  $$('.zoom button').forEach((b) => b.addEventListener('click', () => {
+    ui.zoom = Number(b.dataset.zoom);
+    $$('.zoom button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    const mat = $('#mat');
+    const cx = (mat.scrollLeft + mat.clientWidth / 2) / Math.max(1, mat.scrollWidth);
+    const cy = (mat.scrollTop + mat.clientHeight / 2) / Math.max(1, mat.scrollHeight);
+    layoutStage();
+    mat.scrollLeft = cx * mat.scrollWidth - mat.clientWidth / 2;
+    mat.scrollTop = cy * mat.scrollHeight - mat.clientHeight / 2;
+  }));
+
+  /* ---------- ファイル入力 ---------- */
+  $('#pick').addEventListener('click', () => $('#fileInput').click());
+  $('#fileInput').addEventListener('change', (e) => { addFiles(e.target.files); e.target.value = ''; });
+  $('#files').addEventListener('click', (e) => {
+    const rm = e.target.closest('[data-rm]');
+    if (rm) { if (!batch) removeFile(rm.dataset.rm); return; }
+    const li = e.target.closest('li[data-id]');
+    if (li && li.dataset.id !== activeId) select(li.dataset.id);
+  });
+  $('#files').addEventListener('keydown', (e) => {
+    const li = e.target.closest('li[data-id]');
+    if (li && (e.key === 'Enter' || e.key === ' ') && e.target === li) { e.preventDefault(); select(li.dataset.id); }
+  });
+  const drop = $('#drop');
+  let dragDepth = 0;
+  document.addEventListener('dragenter', (e) => { if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) { dragDepth++; drop.classList.add('over'); } });
+  document.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) drop.classList.remove('over'); });
+  document.addEventListener('dragover', (e) => { e.preventDefault(); });
+  document.addEventListener('drop', (e) => {
+    e.preventDefault(); dragDepth = 0; drop.classList.remove('over');
+    if (e.dataTransfer && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+  });
+  document.addEventListener('paste', (e) => {
+    const items = e.clipboardData ? Array.from(e.clipboardData.files || []) : [];
+    if (items.length) { e.preventDefault(); addFiles(items); }
+  });
+
+  /* ---------- 出力 ---------- */
+  // 保存：Artifact内では downloads 機能、単体のHTMLとして開いた場合は通常のダウンロード
+  let dlPromise = null;
+  function getDl() {
+    if (!dlPromise && window.claude && typeof window.claude.use === 'function') {
+      dlPromise = Promise.resolve(window.claude.use('downloads')).catch(() => null);
+    }
+    return dlPromise;
+  }
+  getDl();
+
+  async function saveBlob(name, blob, unavailableMsg) {
+    const p = getDl();
+    if (!p) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      return;
+    }
+    const api = await p;
+    if (!api) { toast(unavailableMsg); return; }
+    try {
+      await api.save({ filename: name, data: blob });
+      toast(name + ' を保存しました');
+    } catch (err) {
+      const code = err && err.code;
+      if (code === 'declined') toast('保存をキャンセルしました');
+      else if (code === 'rate_limited') toast('保存の確認がすでに開いています。少し待ってからお試しください');
+      else toast(unavailableMsg);
+    }
+  }
+
+  $('#saveBtn').addEventListener('click', () => {
+    const f = active(), r = cur(f);
+    if (!r) return;
+    saveBlob(baseName(f.name) + '.svg', new Blob([r.svg], { type: 'image/svg+xml' }),
+      'この画面では保存できません。「コードをコピー」をお使いください');
+  });
+
+  /* ---------- 一括変換 ---------- */
+  // 一括変換する方式（複数選択可）
+  const batchModes = { color: true, mono: false, embed: false };
+  try {
+    const saved = JSON.parse(localStorage.getItem('svgtrace.batchModes') || 'null');
+    if (saved && MODES.some((m) => saved[m])) MODES.forEach((m) => { batchModes[m] = !!saved[m]; });
+  } catch (err) { /* 保存領域なし */ }
+  const selectedModes = () => MODES.filter((m) => batchModes[m]);
+  function syncBatchModes() {
+    MODES.forEach((m) => { $('#bm-' + m).checked = batchModes[m]; });
+  }
+  MODES.forEach((m) => {
+    $('#bm-' + m).addEventListener('change', (e) => {
+      batchModes[m] = e.target.checked;
+      try { localStorage.setItem('svgtrace.batchModes', JSON.stringify(batchModes)); } catch (err) { /* 保存領域なし */ }
+      updateBatchUI();
+    });
+  });
+
+  function setLocked(on) {
+    $$('.seg button, #presets button, #secTune input, #secTune select, #limitToggle, #pick, .bmodes input').forEach((el) => { el.disabled = on; });
+    $('#files').classList.toggle('locked', on);
+  }
+  function showProcessing(f, mode) {
+    activeId = f.id;
+    $('#empty').hidden = true;
+    $('#stage').hidden = ui.view === 'code';
+    $('#origImg').src = f.src;
+    $('#svgImg').removeAttribute('src');
+    if (ui.view === 'code') $('#code').value = '';
+    layoutStage();
+    notice('');
+    $('#busyText').textContent = MODE_LABEL[mode] + (mode === 'embed' ? '：埋め込み中…' : '：トレース中…');
+    $('#busy').hidden = false;
+  }
+  // 選んだ方式 × すべての画像 の組み合わせ
+  function batchTasks() {
+    const modes = selectedModes(), all = [];
+    files.forEach((f) => modes.forEach((m) => all.push({ f, mode: m, r: resultFor(f, m) })));
+    return all;
+  }
+  function updateBatchUI() {
+    const box = $('#batchBox');
+    box.hidden = files.length < 2 && !batch;
+    if (box.hidden) return;
+    const modes = selectedModes();
+    const tasks = batchTasks();
+    const done = tasks.filter((t) => t.r);
+    const remaining = tasks.length - done.length;
+    const btn = $('#batchBtn');
+    if (batch) {
+      btn.textContent = '中止'; btn.classList.remove('primary'); btn.disabled = false;
+    } else {
+      btn.classList.add('primary');
+      btn.textContent = !modes.length ? 'すべて変換' : remaining ? 'すべて変換（' + remaining + '件）' : 'すべて変換済み';
+      btn.disabled = !modes.length || !remaining;
+    }
+    const zip = $('#zipBtn');
+    zip.textContent = 'ZIPで保存（' + done.length + 'ファイル）';
+    zip.disabled = !!batch || !done.length || zipping;
+    $('#batchProg').hidden = !batch;
+    if (batch) {
+      $('#batchBar').max = batch.total; $('#batchBar').value = batch.done;
+      $('#batchText').textContent = batch.done + ' / ' + batch.total + (batch.failed ? '（失敗 ' + batch.failed + '）' : '');
+    }
+    const notes = [];
+    if (!modes.length) notes.push('変換する方式を1つ以上選んでください。');
+    else if (!batch) {
+      notes.push(files.length + '枚 × ' + modes.length + '方式 = ' + tasks.length + 'ファイル' + (modes.length > 1 ? '。ZIPの中は方式ごとのフォルダ（' + modes.map((m) => ZIP_DIR[m] + '/').join('・') + '）に分かれます' : '') + '。');
+      if (modes.length > 1) notes.push('どの方式も、いまの調整値（ノイズ除去・単純化など）で同じように処理します。白黒のしきい値などは、上の「変換方式」を切り替えると設定できます。');
+      if (done.length && remaining) notes.push('未変換の' + remaining + '件はZIPに入りません。');
+      if (settings.limit && done.some((t) => t.r.bytes > LIMIT)) notes.push('50KBに収まらなかったファイルがあります（赤い表示）。');
+    }
+    $('#batchNote').textContent = notes.join(' ');
+    $('#batchNote').hidden = !notes.length;
+  }
+
+  async function runBatch() {
+    if (batch) { batch.stop = true; cancelJob(); convertGen++; return; }
+    const modes = selectedModes();
+    if (!modes.length) return;
+    const tasks = batchTasks().filter((t) => !t.r);
+    if (!tasks.length) return;
+    if (tasks.some((t) => t.mode !== 'embed') && !window.ImageTracer) { notice(LIB_ERROR, true); return; }
+    clearTimeout(convertTimer);
+    batch = { stop: false, total: tasks.length, done: 0, failed: 0 };
+    tasks.forEach((t) => { t.f.state = 'queued'; t.f.failedAny = false; });
+    setLocked(true);
+    renderFiles();
+    for (let i = 0; i < tasks.length; i++) {
+      const { f, mode } = tasks[i];
+      if (batch.stop) break;
+      if (!files.includes(f)) { batch.done++; continue; }
+      f.state = 'busy'; f.busyMode = mode;
+      showProcessing(f, mode);
+      renderFiles();
+      cancelJob();
+      const gen = ++convertGen;
+      try {
+        const res = await computeResult(f, mode, gen);
+        storeResult(f, res);
+        if (active() === f) showResult(f, res);
+      } catch (err) {
+        if (err && err.cancelled) { if (batch.stop) break; continue; }
+        f.failedAny = true; batch.failed++;
+        if (err && err.message === 'lib') { notice(LIB_ERROR, true); batch.stop = true; }
+      }
+      // この画像の残りの方式があれば待機中、なければ完了（失敗があれば失敗表示）
+      const more = tasks.slice(i + 1).some((t) => t.f === f);
+      f.state = more ? 'queued' : (f.failedAny ? 'error' : '');
+      f.busyMode = null;
+      batch.done++;
+      renderFiles();
+    }
+    files.forEach((f) => { if (f.state === 'queued' || f.state === 'busy') f.state = ''; f.busyMode = null; });
+    const b = batch;
+    batch = null;
+    setLocked(false);
+    $('#busy').hidden = true;
+    renderFiles();
+    const a = active();
+    if (a) {
+      if (cur(a)) showResult(a);
+      else if (!b.stop) convert();
+    }
+    const ok = b.done - b.failed;
+    if (b.stop) toast('一括変換を中止しました（' + ok + 'ファイル変換済み）');
+    else toast(ok + 'ファイルの変換が終わりました' + (b.failed ? '（' + b.failed + '件は失敗）' : '') + '。「ZIPで保存」でまとめて保存できます');
+  }
+  $('#batchBtn').addEventListener('click', runBatch);
+
+  /* ---------- ZIP作成（外部ライブラリなし） ---------- */
+  const CRC_TABLE = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); t[n] = c >>> 0; }
+    return t;
+  })();
+  function crc32(u8) {
+    let c = 0xFFFFFFFF;
+    for (let i = 0; i < u8.length; i++) c = CRC_TABLE[(c ^ u8[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  }
+  async function deflateRaw(u8) {
+    if (typeof CompressionStream === 'undefined') return null;
+    try {
+      const stream = new Blob([u8]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    } catch (err) { return null; }
+  }
+  async function makeZip(entries) {
+    const enc = new TextEncoder();
+    const now = new Date();
+    const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+    const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+    const parts = [], central = [];
+    let offset = 0;
+    for (const e of entries) {
+      const nameB = enc.encode(e.name);
+      const crc = crc32(e.data);
+      let comp = await deflateRaw(e.data), method = 8;
+      if (!comp || comp.length >= e.data.length) { comp = e.data; method = 0; }
+      const lh = new DataView(new ArrayBuffer(30));
+      lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true);
+      lh.setUint16(8, method, true); lh.setUint16(10, dosTime, true); lh.setUint16(12, dosDate, true);
+      lh.setUint32(14, crc, true); lh.setUint32(18, comp.length, true); lh.setUint32(22, e.data.length, true);
+      lh.setUint16(26, nameB.length, true); lh.setUint16(28, 0, true);
+      parts.push(lh, nameB, comp);
+      const ch = new DataView(new ArrayBuffer(46));
+      ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true);
+      ch.setUint16(8, 0x0800, true); ch.setUint16(10, method, true); ch.setUint16(12, dosTime, true);
+      ch.setUint16(14, dosDate, true); ch.setUint32(16, crc, true); ch.setUint32(20, comp.length, true);
+      ch.setUint32(24, e.data.length, true); ch.setUint16(28, nameB.length, true); ch.setUint32(42, offset, true);
+      central.push(ch, nameB);
+      offset += 30 + nameB.length + comp.length;
+    }
+    const cdSize = central.reduce((s, p) => s + p.byteLength, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, entries.length, true); end.setUint16(10, entries.length, true);
+    end.setUint32(12, cdSize, true); end.setUint32(16, offset, true);
+    return new Blob(parts.concat(central, [end]), { type: 'application/zip' });
+  }
+  function uniqueSvgNames(list) {
+    const used = new Set();
+    return list.map((f) => {
+      const b = baseName(f.name).replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim() || 'image';
+      let n = b + '.svg', k = 2;
+      while (used.has(n.toLowerCase())) n = b + '-' + (k++) + '.svg';
+      used.add(n.toLowerCase());
+      return n;
+    });
+  }
+  let zipping = false;
+  const ZIP_DIR = { color: 'color', mono: 'mono', embed: 'embed' };
+  $('#zipBtn').addEventListener('click', async () => {
+    const modes = selectedModes();
+    const tasks = batchTasks().filter((t) => t.r);
+    if (!tasks.length || zipping) return;
+    zipping = true; updateBatchUI();
+    try {
+      const enc = new TextEncoder();
+      const entries = [];
+      modes.forEach((m) => {
+        const list = tasks.filter((t) => t.mode === m);
+        const names = uniqueSvgNames(list.map((t) => t.f));
+        list.forEach((t, i) => entries.push({ name: (modes.length > 1 ? ZIP_DIR[m] + '/' : '') + names[i], data: enc.encode(t.r.svg) }));
+      });
+      const zip = await makeZip(entries);
+      const d = new Date(), p2 = (v) => String(v).padStart(2, '0');
+      const stamp = d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + '-' + p2(d.getHours()) + p2(d.getMinutes());
+      const tag = modes.length === 1 ? '-' + ZIP_DIR[modes[0]] : '';
+      await saveBlob('svg' + tag + '-' + stamp + '.zip', zip, 'この画面では保存できません。画像を1枚ずつ選んで「コードをコピー」をお使いください');
+    } catch (err) {
+      toast('ZIPを作れませんでした。もう一度お試しください');
+    } finally {
+      zipping = false; updateBatchUI();
+    }
+  });
+
+  $('#copyBtn').addEventListener('click', () => {
+    const r = cur(active());
+    if (!r) return;
+    const text = r.svg;
+    const fallback = () => {
+      const tabCode = $$('.tabs button').find((b) => b.dataset.view === 'code');
+      if (ui.view !== 'code') tabCode.click();
+      const ta = $('#code'); ta.focus(); ta.select();
+      toast('コピーできませんでした。選択したコードを手動でコピーしてください');
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => toast('SVGコードをコピーしました（' + fmtBytes(new Blob([text]).size) + '）'), fallback);
+    } else fallback();
+  });
+
+  /* ---------- 起動 ---------- */
+  if (window.ResizeObserver) new ResizeObserver(() => layoutStage()).observe($('#mat'));
+  else window.addEventListener('resize', layoutStage);
+
+  syncBatchModes();
+  syncControls();
+  addSample().then((s) => { renderFiles(); select(s.id); }).catch(() => showEmpty());
+})();
+</script>
+
+</body>
+</html>
