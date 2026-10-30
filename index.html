@@ -287,6 +287,18 @@ textarea#code {
 @media (prefers-reduced-motion: reduce) { .sw-track, .sw-thumb { transition: none; } }
 .notice.ok { background: var(--accent-soft); }
 .bg-opts { display: grid; gap: 10px; padding: 10px 12px; border-radius: 8px; background: var(--bg); }
+.bg-opts .sub { font-size: .86rem; }
+.seg.seg2 { grid-template-columns: repeat(2, 1fr); background: var(--surface); }
+.lasso-box { display: grid; gap: 8px; }
+.lasso-box .mode-note { font-size: .78rem; }
+.lasso { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; z-index: 2; }
+#lassoShade { fill: rgba(255,255,255,.18); stroke: rgba(0,0,0,.6); stroke-width: 4; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+#lassoLine { fill: none; stroke: #ffffff; stroke-width: 2; stroke-dasharray: 7 5; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.draw-bar {
+  display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between;
+  padding: 10px 14px; border-radius: var(--r); background: var(--ink); color: var(--surface); font-size: .86rem;
+}
+.draw-bar button { background: transparent; color: var(--surface); border-color: var(--muted); }
 
 [hidden] { display: none !important; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -363,6 +375,24 @@ textarea#code {
           <span class="sw-track" aria-hidden="true"><span class="sw-thumb"></span></span>
         </label>
         <div class="bg-opts" id="bgOpts" hidden>
+          <div class="ctl">
+            <span class="sub">切り抜き方法</span>
+            <div class="seg seg2" role="group" aria-label="切り抜き方法">
+              <button type="button" data-bgm="auto" aria-pressed="true">自動（外周から）</button>
+              <button type="button" data-bgm="lasso" aria-pressed="false">線で囲む</button>
+            </div>
+          </div>
+          <div class="lasso-box" id="lassoBox" hidden>
+            <p class="mode-note" id="lassoState"></p>
+            <div class="batch-row">
+              <button type="button" class="primary" id="lassoDraw">範囲を描く</button>
+              <button type="button" id="lassoClear">囲みを消す</button>
+            </div>
+            <label class="check">
+              <input type="checkbox" id="lassoRefine">
+              <span>囲んだ中の背景も自動で消す<small>線の内側に残った背景を、線の近くの色から見分けて取り除きます。オフにすると線の形どおりに切り抜きます</small></span>
+            </label>
+          </div>
           <div class="ctl">
             <label for="bgTol">背景の判定の幅 <output id="bgTolOut"></output></label>
             <input type="range" id="bgTol" min="4" max="120" step="1">
@@ -456,6 +486,10 @@ textarea#code {
         </div>
       </div>
 
+      <div class="draw-bar" id="drawBar" hidden role="status">
+        <span><strong>被写体の周りをなぞって囲んでください。</strong>指やマウスを離すと線が閉じて確定します（Escでやめる）。</span>
+        <button type="button" id="drawCancel">やめる</button>
+      </div>
       <div class="mat" id="mat">
         <div class="mat-inner" id="matInner">
           <div class="empty" id="empty" hidden>
@@ -465,6 +499,10 @@ textarea#code {
           <div class="stage" id="stage" hidden>
             <img class="layer orig" id="origImg" alt="元画像">
             <img class="layer svg" id="svgImg" alt="変換後のSVG">
+            <svg class="lasso" id="lassoSvg" hidden viewBox="0 0 1 1" preserveAspectRatio="none" aria-label="被写体を囲む線を描く場所">
+              <path id="lassoShade" d=""></path>
+              <path id="lassoLine" d=""></path>
+            </svg>
             <div class="stage-labels" id="labels"><span>元画像</span><span>SVG</span></div>
             <div class="divider" id="divider" role="slider" tabindex="0" aria-label="比較の境界" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
               <span class="grab"></span><span class="node"></span>
@@ -519,7 +557,7 @@ textarea#code {
     colors: 16, omit: 8, precision: 1, blur: 0, maxSide: 1000,
     threshold: 128, ink: '#1c2321', transparentBg: true, fillGaps: true,
     limit: false,
-    removeBg: false, bgTol: 32, bgInner: false, bgCrop: false
+    removeBg: false, bgTol: 32, bgInner: false, bgCrop: false, bgMethod: 'auto', lassoRefine: true
   };
   try {
     settings.limit = localStorage.getItem('svgtrace.limit50') === '1';
@@ -527,12 +565,14 @@ textarea#code {
     if (bg) {
       settings.removeBg = !!bg.on; settings.bgInner = !!bg.inner; settings.bgCrop = !!bg.crop;
       if (bg.tol >= 4 && bg.tol <= 120) settings.bgTol = bg.tol;
+      if (bg.method === 'lasso') settings.bgMethod = 'lasso';
+      if (bg.refine === false) settings.lassoRefine = false;
     }
   } catch (err) { /* 保存領域なし */ }
   function saveBgPrefs() {
-    try { localStorage.setItem('svgtrace.bg', JSON.stringify({ on: settings.removeBg, tol: settings.bgTol, inner: settings.bgInner, crop: settings.bgCrop })); } catch (err) { /* 保存領域なし */ }
+    try { localStorage.setItem('svgtrace.bg', JSON.stringify({ on: settings.removeBg, tol: settings.bgTol, inner: settings.bgInner, crop: settings.bgCrop, method: settings.bgMethod, refine: settings.lassoRefine })); } catch (err) { /* 保存領域なし */ }
   }
-  const ui = { view: 'compare', zoom: 1, split: 50 };
+  const ui = { view: 'compare', zoom: 1, split: 50, drawing: false };
   const files = [];
   let activeId = null;
   let batch = null; // 一括変換の進行状況（実行中のみ）
@@ -887,6 +927,7 @@ textarea#code {
 
   /* ---------- 選択と変換 ---------- */
   function select(id) {
+    if (ui.drawing) exitDraw();
     activeId = id;
     renderFiles();
     const f = active();
@@ -900,16 +941,16 @@ textarea#code {
   function active() { return files.find((x) => x.id === activeId) || null; }
 
   // 方式ごとの設定キー（同じキーの結果は使い回す）
-  function settingsKey(mode) {
+  function settingsKey(mode, f) {
     const s = settings;
     mode = mode || s.mode;
-    if (mode === 'embed') return 'embed|' + s.limit + '|' + bgKey();
-    const common = [mode, s.omit, s.precision, s.blur, s.maxSide, s.fillGaps, s.limit, bgKey()];
+    if (mode === 'embed') return 'embed|' + s.limit + '|' + bgKey(f);
+    const common = [mode, s.omit, s.precision, s.blur, s.maxSide, s.fillGaps, s.limit, bgKey(f)];
     if (mode === 'mono') common.push(s.threshold, s.ink, s.transparentBg);
     else common.push(s.colors);
     return common.join('|');
   }
-  function resultFor(f, mode) { return (f.cache && f.cache[settingsKey(mode)]) || null; }
+  function resultFor(f, mode) { return (f.cache && f.cache[settingsKey(mode, f)]) || null; }
   function cur(f) { return f ? resultFor(f, settings.mode) : null; }
 
   let convertTimer = null;
@@ -920,7 +961,7 @@ textarea#code {
   // 1枚分の変換結果を作る（表示はしない）
   async function computeResult(f, mode, gen) {
     const started = performance.now();
-    const key = settingsKey(mode);
+    const key = settingsKey(mode, f);
     if (mode !== 'embed' && !window.ImageTracer) throw new Error('lib');
     let src = f;
     if (settings.removeBg) {
@@ -939,7 +980,7 @@ textarea#code {
     const old = f.cache[res.key];
     if (old && old !== res && old.url) URL.revokeObjectURL(old.url);
     f.cache[res.key] = res;
-    const live = new Set(MODES.map((m) => settingsKey(m)));
+    const live = new Set(MODES.map((m) => settingsKey(m, f)));
     Object.keys(f.cache).forEach((k) => {
       if (!live.has(k)) { if (f.cache[k].url) URL.revokeObjectURL(f.cache[k].url); delete f.cache[k]; }
     });
@@ -1018,22 +1059,41 @@ textarea#code {
 
   /* ---------- 背景透過：外周から背景を判定して切り抜く ---------- */
   // d: RGBA配列, W×H。戻り値 mask（1=背景）と判定した背景色・割合
-  function computeBgMask(d, W, H, tol, inner) {
+  // region（任意）: 線で囲んだ範囲（1=内側）。外側はすべて背景にし、線の内側のふちを「外周」として扱う
+  // refine: region があるとき、内側に残った背景も色で見分けて消すか
+  function computeBgMask(d, W, H, tol, inner, region, refine) {
     const N = W * H, mask = new Uint8Array(N);
+    const hex = (c) => '#' + c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
+    const count = () => { let c = 0; for (let i = 0; i < N; i++) c += mask[i]; return c / N; };
+    if (region) {
+      for (let i = 0; i < N; i++) if (!region[i]) mask[i] = 1;
+      if (!refine) return { mask, colors: [], ratio: count() };
+    }
     const dist = (i, c) => { const dr = d[i * 4] - c[0], dg = d[i * 4 + 1] - c[1], db = d[i * 4 + 2] - c[2]; return Math.sqrt(dr * dr + dg * dg + db * db); };
+    // 外周の画素：画像のふち、または囲んだ線のすぐ内側
+    const edge = [];
+    if (region) {
+      for (let y = 0, i = 0; y < H; y++) {
+        for (let x = 0; x < W; x++, i++) {
+          if (!region[i]) continue;
+          if (x === 0 || y === 0 || x === W - 1 || y === H - 1 || !region[i - 1] || !region[i + 1] || !region[i - W] || !region[i + W]) edge.push(i);
+        }
+      }
+    } else {
+      for (let x = 0; x < W; x++) { edge.push(x); if (H > 1) edge.push((H - 1) * W + x); }
+      for (let y = 1; y < H - 1; y++) { edge.push(y * W); if (W > 1) edge.push(y * W + W - 1); }
+    }
     // 1) 外周の色を集計して背景色の候補を決める
     const buckets = new Map();
     let border = 0;
-    const addB = (i) => {
+    for (const i of edge) {
       border++;
-      if (d[i * 4 + 3] < 128) return;
+      if (d[i * 4 + 3] < 128) continue;
       const k = ((d[i * 4] >> 4) << 8) | ((d[i * 4 + 1] >> 4) << 4) | (d[i * 4 + 2] >> 4);
       let b = buckets.get(k);
       if (!b) { b = { n: 0, r: 0, g: 0, b: 0 }; buckets.set(k, b); }
       b.n++; b.r += d[i * 4]; b.g += d[i * 4 + 1]; b.b += d[i * 4 + 2];
-    };
-    for (let x = 0; x < W; x++) { addB(x); if (H > 1) addB((H - 1) * W + x); }
-    for (let y = 1; y < H - 1; y++) { addB(y * W); if (W > 1) addB(y * W + W - 1); }
+    }
     const list = Array.from(buckets.values()).sort((a, b) => b.n - a.n);
     const colors = [];
     for (const b of list) {
@@ -1046,9 +1106,7 @@ textarea#code {
     // 2) 外周から、背景色に近い画素をたどって塗りつぶす（ゆるやかなグラデーションも追える）
     const q = new Int32Array(N);
     let qh = 0, qt = 0;
-    const seed = (i) => { if (!mask[i] && (isClear(i) || distBg(i) <= tol)) { mask[i] = 1; q[qt++] = i; } };
-    for (let x = 0; x < W; x++) { seed(x); seed((H - 1) * W + x); }
-    for (let y = 0; y < H; y++) { seed(y * W); seed(y * W + W - 1); }
+    for (const i of edge) { if (!mask[i] && (isClear(i) || distBg(i) <= tol)) { mask[i] = 1; q[qt++] = i; } }
     const local = tol * 0.3, far = tol * 2.5;
     const tryJoin = (j, i) => {
       if (mask[j]) return;
@@ -1110,20 +1168,29 @@ textarea#code {
       }
       for (const i of fringe) mask[i] = 1;
     }
-    let cnt = 0;
-    for (let i = 0; i < N; i++) cnt += mask[i];
-    const hex = (c) => '#' + c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
-    return { mask, colors: colors.map(hex), ratio: cnt / N };
+    return { mask, colors: colors.map(hex), ratio: count() };
   }
 
-  async function removeBackground(f, tol, inner, crop) {
+  // 正規化座標（0〜1）の多角形を W×H の内側フラグにする
+  function rasterizeLasso(pts, W, H) {
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.beginPath();
+    pts.forEach((p, k) => { const x = p[0] * W, y = p[1] * H; if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+    ctx.closePath();
+    ctx.fillStyle = '#000'; ctx.fill();
+    const a = ctx.getImageData(0, 0, W, H).data, r = new Uint8Array(W * H);
+    for (let i = 0; i < r.length; i++) r[i] = a[i * 4 + 3] >= 128 ? 1 : 0;
+    return r;
+  }
+  async function removeBackground(f, tol, inner, crop, lasso, refine) {
     const s = Math.min(1, 3000 / Math.max(f.w, f.h));
     const W = Math.max(1, Math.round(f.w * s)), H = Math.max(1, Math.round(f.h * s));
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
     const ctx = cv.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(f.img, 0, 0, W, H);
     const imgd = ctx.getImageData(0, 0, W, H), d = imgd.data;
-    const info = computeBgMask(d, W, H, tol, inner);
+    const info = computeBgMask(d, W, H, tol, inner, lasso ? rasterizeLasso(lasso, W, H) : null, refine);
     const m = info.mask;
     let minX = W, minY = H, maxX = -1, maxY = -1;
     for (let y = 0, i = 0; y < H; y++) {
@@ -1156,24 +1223,31 @@ textarea#code {
     return {
       w: Math.max(1, Math.round(cw / s)), h: Math.max(1, Math.round(ch / s)), img, file: blob, src: url,
       dataURL: null, type: 'image/png', hasAlpha: true, size: blob.size, cutout: true,
-      bg: { colors: info.colors, ratio: info.ratio, cropped }
+      bg: { colors: info.colors, ratio: info.ratio, cropped, lasso: !!lasso, refine: !!(lasso && refine) }
     };
   }
-  function bgKey() {
+  // 背景透過の設定キー。線で囲む方式では画像ごとの囲み（f.lassoVer）も含める
+  function usesLasso(f) { return settings.bgMethod === 'lasso' && !!(f && f.lasso); }
+  function bgKey(f) {
     const s = settings;
-    return s.removeBg ? 'bg' + s.bgTol + (s.bgInner ? 'i' : '') + (s.bgCrop ? 'c' : '') : 'nobg';
+    if (!s.removeBg) return 'nobg';
+    let k = 'bg' + s.bgTol + (s.bgInner ? 'i' : '') + (s.bgCrop ? 'c' : '');
+    if (usesLasso(f)) k += '|L' + f.lassoVer + (s.lassoRefine ? 'r' : '');
+    return k;
   }
   async function getCut(f) {
-    const key = bgKey();
+    const key = bgKey(f);
     if (f.cutCache && f.cutCache.key === key) return f.cutCache.cut;
-    const cut = await removeBackground(f, settings.bgTol, settings.bgInner, settings.bgCrop);
+    const cut = await removeBackground(f, settings.bgTol, settings.bgInner, settings.bgCrop,
+      usesLasso(f) ? f.lasso : null, settings.lassoRefine);
     if (f.cutCache && f.cutCache.cut.src) URL.revokeObjectURL(f.cutCache.cut.src);
     f.cutCache = { key, cut };
     return cut;
   }
   // プレビュー左側に出す画像（背景透過がオンで切り抜き済みなら切り抜き後）
   function viewSrc(f) {
-    if (settings.removeBg && f.cutCache && f.cutCache.key === bgKey()) return f.cutCache.cut;
+    if (ui.drawing) return f; // 囲む線を描くときは元画像
+    if (settings.removeBg && f.cutCache && f.cutCache.key === bgKey(f)) return f.cutCache.cut;
     return f;
   }
 
@@ -1339,7 +1413,14 @@ textarea#code {
       const pct = r.bg.ratio * 100;
       if (pct < 0.5) tips.push('背景透過：背景を見つけられませんでした。画像の外周に背景が写っている画像で使えます。「背景の判定の幅」を広げると見つかることがあります。');
       else if (pct > 97) tips.push('背景透過：ほぼ全体が背景と判定されました。「背景の判定の幅」を狭めてください。');
-      else tips.push('背景透過：外周の色（' + r.bg.colors.slice(0, 3).join('・') + (r.bg.colors.length > 3 ? ' ほか' : '') + '）を背景と判定し、画像の' + (pct < 10 ? pct.toFixed(1) : Math.round(pct)) + '%を透明にしました' + (r.bg.cropped ? '。余白を切り詰めて ' + r.srcW + '×' + r.srcH + 'px にしています' : '') + '。');
+      else {
+        const pctText = (pct < 10 ? pct.toFixed(1) : Math.round(pct)) + '%';
+        const cropText = r.bg.cropped ? '。余白を切り詰めて ' + r.srcW + '×' + r.srcH + 'px にしています' : '';
+        const colText = r.bg.colors.slice(0, 3).join('・') + (r.bg.colors.length > 3 ? ' ほか' : '');
+        if (r.bg.lasso) tips.push('背景透過：線で囲んだ範囲を被写体として切り抜き' + (r.bg.refine && r.bg.colors.length ? '、内側に残った背景（' + colText + '）も取り除いて' : '') + '、画像の' + pctText + 'を透明にしました' + cropText + '。');
+        else tips.push('背景透過：外周の色（' + colText + '）を背景と判定し、画像の' + pctText + 'を透明にしました' + cropText + '。');
+      }
+      if (settings.bgMethod === 'lasso' && !r.bg.lasso) tips.push('この画像はまだ線で囲んでいないため、自動で切り抜きました。「範囲を描く」で囲めます。');
     }
     if (f.type === 'image/gif') tips.push('GIFアニメは最初のコマだけを変換します。');
     if (f.pef) tips.push('PEFはRAWデータを現像せず、ファイルに記録されたプレビューJPEG（' + f.w + '×' + f.h + 'px）を変換しています。');
@@ -1382,12 +1463,115 @@ textarea#code {
   function applySplit() {
     const compare = ui.view === 'compare';
     $('#svgImg').style.clipPath = compare ? 'inset(0 0 0 ' + ui.split + '%)' : 'none';
-    $('#origImg').hidden = !compare;
-    $('#divider').hidden = !compare;
-    $('#labels').hidden = !compare;
+    $('#origImg').hidden = !compare && !ui.drawing;
+    $('#svgImg').hidden = !!ui.drawing;
+    $('#divider').hidden = !compare || !!ui.drawing;
+    $('#labels').hidden = !compare || !!ui.drawing;
+    $('#lassoSvg').toggleAttribute('hidden', !ui.drawing); // SVG要素は .hidden が効かないため属性で切り替える
     $('#divider').style.left = ui.split + '%';
     $('#divider').setAttribute('aria-valuenow', Math.round(ui.split));
   }
+
+  /* ---------- 線で囲んで切り抜く ---------- */
+  function lassoPathD(pts, closed) {
+    if (!pts || !pts.length) return '';
+    return 'M' + pts.map((p) => p[0].toFixed(4) + ' ' + p[1].toFixed(4)).join(' L') + (closed ? ' Z' : '');
+  }
+  function showLassoPath(pts, closed) {
+    const dd = lassoPathD(pts, closed);
+    $('#lassoShade').setAttribute('d', dd);
+    $('#lassoLine').setAttribute('d', dd);
+  }
+  function syncLassoUI() {
+    const f = active();
+    const st = $('#lassoState');
+    if (!f) { st.textContent = '画像を追加すると、被写体を線で囲めます。'; }
+    else if (f.lasso) { st.textContent = '「' + f.name + '」は囲み済みです。囲み直すときは「範囲を描く」を押してください。'; }
+    else { st.textContent = '「範囲を描く」を押して、プレビューの被写体の周りをなぞってください。囲んでいない画像は自動で切り抜きます。'; }
+    $('#lassoDraw').textContent = f && f.lasso ? '描き直す' : '範囲を描く';
+    $('#lassoDraw').disabled = !f || !!batch;
+    $('#lassoClear').disabled = !f || !f.lasso || !!batch;
+  }
+  function enterDraw() {
+    const f = active();
+    if (!f || batch) return;
+    if (ui.view !== 'compare') $$('.tabs button').find((b) => b.dataset.view === 'compare').click();
+    ui.drawing = true;
+    $('#drawBar').hidden = false;
+    $('#origImg').src = f.src;
+    showLassoPath(f.lasso, true);
+    layoutStage();
+    $('#lassoSvg').focus && $('#lassoSvg').focus();
+  }
+  function exitDraw() {
+    if (!ui.drawing) return;
+    ui.drawing = false;
+    drawPts = null;
+    $('#drawBar').hidden = true;
+    const f = active();
+    if (f) { $('#origImg').src = viewSrc(f).src; }
+    layoutStage();
+  }
+  let drawPts = null, lastXY = null;
+  (function setupLasso() {
+    const svg = $('#lassoSvg'), stage = $('#stage');
+    const clamp = (v) => Math.max(0, Math.min(1, v));
+    const norm = (e) => { const r = stage.getBoundingClientRect(); return [clamp((e.clientX - r.left) / r.width), clamp((e.clientY - r.top) / r.height)]; };
+    svg.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      try { svg.setPointerCapture(e.pointerId); } catch (err) { /* 取得できなくても描ける */ }
+      drawPts = [norm(e)]; lastXY = [e.clientX, e.clientY];
+      showLassoPath(drawPts, false);
+    });
+    svg.addEventListener('pointermove', (e) => {
+      if (!drawPts) return;
+      if (Math.hypot(e.clientX - lastXY[0], e.clientY - lastXY[1]) < 3) return;
+      lastXY = [e.clientX, e.clientY];
+      drawPts.push(norm(e));
+      showLassoPath(drawPts, false);
+    });
+    const finish = () => {
+      if (!drawPts) return;
+      const pts = drawPts; drawPts = null;
+      const f = active();
+      if (!f) return;
+      // 囲んだ面積（画像全体に対する割合）
+      let area = 0;
+      for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; area += a[0] * b[1] - b[0] * a[1]; }
+      area = Math.abs(area) / 2;
+      if (pts.length < 6 || area < 0.002) {
+        toast('もう少し大きく、被写体の周りをぐるっと囲んでください');
+        showLassoPath(f.lasso, true);
+        return;
+      }
+      f.lasso = pts;
+      f.lassoVer = (f.lassoVer || 0) + 1;
+      settings.removeBg = true; settings.bgMethod = 'lasso';
+      saveBgPrefs();
+      exitDraw();
+      syncControls();
+      convert();
+    };
+    svg.addEventListener('pointerup', finish);
+    svg.addEventListener('pointercancel', () => { drawPts = null; const f = active(); showLassoPath(f && f.lasso, true); });
+    svg.addEventListener('click', (e) => e.stopPropagation());
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && ui.drawing) exitDraw(); });
+  })();
+  $('#drawCancel').addEventListener('click', exitDraw);
+  $('#lassoDraw').addEventListener('click', enterDraw);
+  $('#lassoClear').addEventListener('click', () => {
+    const f = active();
+    if (!f || !f.lasso) return;
+    f.lasso = null; f.lassoVer = (f.lassoVer || 0) + 1;
+    syncControls(); convert();
+  });
+  $('#lassoRefine').addEventListener('change', (e) => { settings.lassoRefine = e.target.checked; saveBgPrefs(); convert(); });
+  $$('.seg button[data-bgm]').forEach((b) => b.addEventListener('click', () => {
+    settings.bgMethod = b.dataset.bgm; saveBgPrefs(); syncControls();
+    const f = active();
+    if (settings.bgMethod === 'lasso' && f && !f.lasso) enterDraw();
+    else { exitDraw(); convert(); }
+  }));
   (function setupDivider() {
     const dv = $('#divider'), stage = $('#stage');
     let dragging = false;
@@ -1400,7 +1584,7 @@ textarea#code {
     dv.addEventListener('pointermove', (e) => { if (dragging) move(e); });
     dv.addEventListener('pointerup', () => { dragging = false; });
     dv.addEventListener('pointercancel', () => { dragging = false; });
-    stage.addEventListener('click', (e) => { if (ui.view === 'compare' && e.target !== dv && !dv.contains(e.target)) move(e); });
+    stage.addEventListener('click', (e) => { if (ui.view === 'compare' && !ui.drawing && e.target !== dv && !dv.contains(e.target)) move(e); });
     dv.addEventListener('keydown', (e) => {
       const step = e.shiftKey ? 10 : 2;
       if (e.key === 'ArrowLeft') ui.split = Math.max(0, ui.split - step);
@@ -1419,7 +1603,11 @@ textarea#code {
     embed: '画像をそのままSVGの中に入れます。見た目は変わりませんが、拡大すると元画像と同じくぼやけます。'
   };
   function syncControls() {
-    $$('.seg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === settings.mode)));
+    $$('.seg button[data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === settings.mode)));
+    $$('.seg button[data-bgm]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.bgm === settings.bgMethod)));
+    $('#lassoBox').hidden = settings.bgMethod !== 'lasso';
+    $('#lassoRefine').checked = settings.lassoRefine;
+    syncLassoUI();
     $$('#presets button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.preset === settings.preset)));
     $('#modeNote').textContent = MODE_NOTES[settings.mode];
     $('#secPreset').hidden = settings.mode !== 'color';
@@ -1444,7 +1632,7 @@ textarea#code {
     $('#zoomGroup').hidden = ui.view === 'code';
   }
 
-  $$('.seg button').forEach((b) => b.addEventListener('click', () => {
+  $$('.seg button[data-mode]').forEach((b) => b.addEventListener('click', () => {
     settings.mode = b.dataset.mode; syncControls(); convert();
   }));
   $$('#presets button').forEach((b) => b.addEventListener('click', () => {
@@ -1471,7 +1659,12 @@ textarea#code {
     try { localStorage.setItem('svgtrace.limit50', settings.limit ? '1' : '0'); } catch (err) { /* 保存領域なし */ }
     convert();
   });
-  $('#bgToggle').addEventListener('change', (e) => { settings.removeBg = e.target.checked; saveBgPrefs(); syncControls(); convert(); });
+  $('#bgToggle').addEventListener('change', (e) => {
+    settings.removeBg = e.target.checked; saveBgPrefs(); syncControls();
+    if (!settings.removeBg) exitDraw();
+    else if (settings.bgMethod === 'lasso' && active() && !active().lasso) { enterDraw(); return; }
+    convert();
+  });
   $('#bgTol').addEventListener('input', (e) => { settings.bgTol = Number(e.target.value); saveBgPrefs(); syncControls(); scheduleConvert(); });
   $('#bgInner').addEventListener('change', (e) => { settings.bgInner = e.target.checked; saveBgPrefs(); convert(); });
   $('#bgCrop').addEventListener('change', (e) => { settings.bgCrop = e.target.checked; saveBgPrefs(); convert(); });
@@ -1479,6 +1672,7 @@ textarea#code {
   $$('.tabs button').forEach((b) => b.addEventListener('click', () => {
     ui.view = b.dataset.view;
     $$('.tabs button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    if (ui.drawing && ui.view !== 'compare') exitDraw();
     const code = ui.view === 'code';
     $('#mat').hidden = code; $('#code').hidden = !code;
     const f = active();
@@ -1585,7 +1779,8 @@ textarea#code {
   });
 
   function setLocked(on) {
-    $$('.seg button, #presets button, #secTune input, #secTune select, #limitToggle, #bgToggle, #bgOpts input, #pick, .bmodes input').forEach((el) => { el.disabled = on; });
+    $$('.seg button, #presets button, #secTune input, #secTune select, #limitToggle, #bgToggle, #bgOpts input, #bgOpts button, #pick, .bmodes input').forEach((el) => { el.disabled = on; });
+    if (!on) syncLassoUI();
     $('#files').classList.toggle('locked', on);
   }
   function showProcessing(f, mode) {
@@ -1661,6 +1856,7 @@ textarea#code {
     if (!tasks.length) return null;
     if (tasks.some((t) => t.mode !== 'embed') && !window.ImageTracer) { notice(LIB_ERROR, true); return null; }
     clearTimeout(convertTimer);
+    exitDraw();
     batch = { stop: false, total: tasks.length, done: 0, failed: 0 };
     tasks.forEach((t) => { t.f.state = 'queued'; t.f.failedAny = false; });
     setLocked(true);
