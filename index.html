@@ -153,6 +153,7 @@ progress { width: 100%; height: 8px; accent-color: var(--accent); }
 .batch-note { margin: 0; font-size: .76rem; color: var(--muted); }
 .switch input:disabled + .sw-track { opacity: .5; }
 .switch:has(input:disabled) { cursor: not-allowed; }
+.row small.for { display: block; font-size: .7rem; color: var(--muted); }
 .badge.anim { background: var(--accent-soft); color: var(--accent); }
 .badge { font-size: .65rem; font-weight: 700; padding: 0 6px; border-radius: 4px; background: var(--warn-soft); color: var(--warn); margin-left: 4px; vertical-align: 1px; }
 
@@ -310,7 +311,7 @@ textarea#code {
 <div class="wrap">
   <header class="top">
     <h1>SVGトレース工房<span class="arrow">px→path</span></h1>
-    <p>JPG・PNG・WEBP・GIF・PEF（PENTAX RAW）の画像を、ブラウザの中でSVGに変換します。画像はどこにも送信されません。</p>
+    <p>JPG・PNG・WEBP・GIF・PEF（PENTAX RAW）の画像や、GIF・WebPアニメ、MP4などの動画を、ブラウザの中でSVGに変換します。画像はどこにも送信されません。</p>
   </header>
 
   <div class="app">
@@ -320,9 +321,9 @@ textarea#code {
         <h2>画像 <small id="fileCount"></small></h2>
         <div class="drop" id="drop">
           <button class="primary" id="pick" type="button">画像を選択</button>
-          <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/x-pentax-pef,.jpg,.jpeg,.png,.webp,.gif,.pef" multiple hidden>
+          <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/x-pentax-pef,video/mp4,video/webm,video/quicktime,.jpg,.jpeg,.png,.webp,.gif,.pef,.mp4,.m4v,.mov,.webm" multiple hidden>
           <div class="hint">ここにドラッグ＆ドロップ、または貼り付け（Ctrl/⌘+V）。複数まとめて追加できます</div>
-          <div class="formats"><span>JPG</span><span>PNG</span><span>WEBP</span><span>GIF</span><span>PEF</span></div>
+          <div class="formats"><span>JPG</span><span>PNG</span><span>WEBP</span><span>GIF</span><span>PEF</span><span>MP4</span><span>WEBM</span><span>MOV</span></div>
         </div>
         <ul class="files" id="files"></ul>
         <div class="batch" id="batchBox" hidden>
@@ -413,20 +414,31 @@ textarea#code {
       <section class="sec" id="secAnim" hidden>
         <label class="switch" for="animToggle">
           <span class="sw-text">
-            <strong>アニメーションとして変換</strong>
-            <small>GIFアニメのコマをそれぞれ変換し、動くSVGにします</small>
+            <strong>アニメーション・動画として変換</strong>
+            <small>GIF・WebPアニメや動画のコマをそれぞれ変換し、動くSVGにします</small>
           </span>
           <input type="checkbox" role="switch" id="animToggle">
           <span class="sw-track" aria-hidden="true"><span class="sw-thumb"></span></span>
         </label>
         <div class="bg-opts" id="animOpts">
-          <div class="row">
-            <label for="animStep">コマを間引く</label>
+          <div class="row" id="rowStep">
+            <label for="animStep">コマを間引く<small class="for">GIF・WebP</small></label>
             <select id="animStep">
               <option value="1">間引かない</option>
               <option value="2">2コマに1枚</option>
               <option value="3">3コマに1枚</option>
               <option value="4">4コマに1枚</option>
+            </select>
+          </div>
+          <div class="row" id="rowFps">
+            <label for="videoFps">1秒あたりのコマ数<small class="for">動画</small></label>
+            <select id="videoFps">
+              <option value="5">5コマ</option>
+              <option value="8">8コマ</option>
+              <option value="10">10コマ</option>
+              <option value="12">12コマ</option>
+              <option value="15">15コマ</option>
+              <option value="24">24コマ</option>
             </select>
           </div>
           <div class="row">
@@ -575,8 +587,10 @@ textarea#code {
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => Array.from(document.querySelectorAll(s));
 
-  const ACCEPT = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+  const ACCEPT = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif', 'image/bmp'];
   const EXT = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' };
+  const VIDEO_TYPES = ['video/mp4', 'video/webm', 'video/quicktime'];
+  const VIDEO_EXT = { mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm' };
 
   const PRESETS = {
     standard: { colors: 16, omit: 8, precision: 1, blur: 0 },
@@ -592,7 +606,7 @@ textarea#code {
     threshold: 128, ink: '#1c2321', transparentBg: true, fillGaps: true,
     limit: false,
     removeBg: false, bgTol: 32, bgInner: false, bgCrop: false, bgMethod: 'auto', lassoRefine: true,
-    animate: true, animStep: 1, animMax: 30
+    animate: true, animStep: 1, animMax: 30, videoFps: 10
   };
   try {
     settings.limit = localStorage.getItem('svgtrace.limit50') === '1';
@@ -610,10 +624,11 @@ textarea#code {
       settings.animate = an.on !== false;
       if ([1, 2, 3, 4].includes(an.step)) settings.animStep = an.step;
       if ([10, 20, 30, 60, 120].includes(an.max)) settings.animMax = an.max;
+      if ([5, 8, 10, 12, 15, 24].includes(an.fps)) settings.videoFps = an.fps;
     }
   } catch (err) { /* 保存領域なし */ }
   function saveAnimPrefs() {
-    try { localStorage.setItem('svgtrace.anim', JSON.stringify({ on: settings.animate, step: settings.animStep, max: settings.animMax })); } catch (err) { /* 保存領域なし */ }
+    try { localStorage.setItem('svgtrace.anim', JSON.stringify({ on: settings.animate, step: settings.animStep, max: settings.animMax, fps: settings.videoFps })); } catch (err) { /* 保存領域なし */ }
   }
   function saveBgPrefs() {
     try { localStorage.setItem('svgtrace.bg', JSON.stringify({ on: settings.removeBg, tol: settings.bgTol, inner: settings.bgInner, crop: settings.bgCrop, method: settings.bgMethod, refine: settings.lassoRefine })); } catch (err) { /* 保存領域なし */ }
@@ -718,13 +733,13 @@ textarea#code {
     if (n < 1000000) return (n / 1000).toFixed(1) + ' KB';
     return (n / 1000000).toFixed(2) + ' MB';
   }
-  function typeLabel(t) { return ({ 'image/jpeg': 'JPG', 'image/png': 'PNG', 'image/webp': 'WEBP', 'image/gif': 'GIF', 'image/x-pentax-pef': 'PEF' })[t] || '?'; }
+  function typeLabel(t) { return ({ 'image/jpeg': 'JPG', 'image/png': 'PNG', 'image/webp': 'WEBP', 'image/gif': 'GIF', 'image/x-pentax-pef': 'PEF', 'image/avif': 'AVIF', 'image/bmp': 'BMP', 'video/mp4': 'MP4', 'video/webm': 'WEBM', 'video/quicktime': 'MOV' })[t] || '?'; }
   function baseName(n) { return (n || 'image').replace(/\.[^.]+$/, '') || 'image'; }
   function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
   let toastTimer = null;
   function toast(msg) {
     const t = $('#toast'); t.textContent = msg; t.hidden = false;
-    clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, Math.min(9000, 2600 + msg.length * 50));
   }
   function notice(msg, kind) {
     const n = $('#notice');
@@ -883,6 +898,35 @@ textarea#code {
     throw new Error('nopreview');
   }
 
+  /* ---------- 形式の判別（ファイル先頭のバイトで見分ける） ---------- */
+  const SNIFF_REASON = {
+    'x-heic': 'HEIC形式（iPhoneの写真など）にはブラウザが対応していません。JPGかPNGに書き出してから読み込んでください',
+    'image/svg+xml': 'すでにSVGファイルです',
+    'x-tiff': 'TIFF形式には対応していません（PENTAXのRAWは拡張子を .pef にしてください）'
+  };
+  async function sniffType(f) {
+    try {
+      const b = new Uint8Array(await f.slice(0, 64).arrayBuffer());
+      const s = (o, l) => String.fromCharCode.apply(null, b.subarray(o, o + l));
+      if (s(0, 4) === 'GIF8') return 'image/gif';
+      if (b[0] === 0x89 && s(1, 3) === 'PNG') return 'image/png';
+      if (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) return 'image/jpeg';
+      if (s(0, 4) === 'RIFF' && s(8, 4) === 'WEBP') return 'image/webp';
+      if (s(4, 4) === 'ftyp') {
+        const brand = s(8, 4);
+        if (/^(heic|heix|hevc|heim|heis|mif1|msf1)/.test(brand)) return 'x-heic';
+        if (/^avi[fs]/.test(brand)) return 'image/avif';
+        if (brand === 'qt  ') return 'video/quicktime';
+        return 'video/mp4';
+      }
+      if (b[0] === 0x1A && b[1] === 0x45 && b[2] === 0xDF && b[3] === 0xA3) return 'video/webm';
+      if ((s(0, 2) === 'II' && b[2] === 42) || (s(0, 2) === 'MM' && b[3] === 42)) return 'x-tiff';
+      if (s(0, 2) === 'BM') return 'image/bmp';
+      if (/^\s*<(\?xml|svg)/i.test(s(0, 64))) return 'image/svg+xml';
+    } catch (err) { /* 読めなければ種類の情報に頼る */ }
+    return '';
+  }
+
   /* ---------- ファイル追加 ---------- */
   async function addFiles(list) {
     const arr = Array.from(list || []);
@@ -904,19 +948,87 @@ textarea#code {
         $('#busy').hidden = true;
         continue;
       }
-      let type = f.type;
-      if (!ACCEPT.includes(type)) { const ext = (f.name.split('.').pop() || '').toLowerCase(); type = EXT[ext] || type; }
-      if (!ACCEPT.includes(type)) { rejected.push(f.name || 'ファイル'); continue; }
-      const src = URL.createObjectURL(f);
+      // 拡張子や種類の情報ではなく、ファイルの中身で形式を見分ける
+      const sniffed = await sniffType(f);
+      const ext = ((f.name || '').split('.').pop() || '').toLowerCase();
+      const vtype = VIDEO_TYPES.includes(sniffed) ? sniffed : (!sniffed && (VIDEO_EXT[ext] || (VIDEO_TYPES.includes(f.type) ? f.type : ''))) || '';
+      if (vtype) {
+        $('#busyText').textContent = '動画を読み込み中…';
+        $('#busy').hidden = false;
+        const vurl = URL.createObjectURL(f);
+        try {
+          const v = await loadVideo(vurl);
+          const dur = await videoDuration(v);
+          if (!v.videoWidth || !v.videoHeight || !dur) throw new Error('video');
+          // 1コマ目を静止画として用意（一覧・比較表示・静止画として変換するとき用）
+          await seekVideo(v, Math.min(0.05, dur / 2));
+          const ps = Math.min(1, 2000 / Math.max(v.videoWidth, v.videoHeight));
+          const pc = document.createElement('canvas');
+          pc.width = Math.round(v.videoWidth * ps); pc.height = Math.round(v.videoHeight * ps);
+          pc.getContext('2d').drawImage(v, 0, 0, pc.width, pc.height);
+          const pb = await canvasBlob(pc, 'image/png');
+          const purl = URL.createObjectURL(pb);
+          const pimg = await loadImage(purl);
+          const entry = { id: 'f' + (++seq), name: f.name || 'video.' + typeLabel(vtype).toLowerCase(), type: vtype, size: f.size, file: pb, src: purl, dataURL: null,
+            img: pimg, w: v.videoWidth, h: v.videoHeight, hasAlpha: false, video: v, videoUrl: vurl, result: null,
+            anim: { kind: 'video', dur: dur * 1000, W: v.videoWidth, H: v.videoHeight, rep: 'indefinite', count: null } };
+          files.push(entry);
+          if (!firstNew) firstNew = entry;
+        } catch (err) {
+          URL.revokeObjectURL(vurl);
+          rejected.push((f.name || '動画') + '（' + VIDEO_REASON + '）');
+        }
+        $('#busy').hidden = true;
+        continue;
+      }
+      let type = ACCEPT.includes(sniffed) ? sniffed : '';
+      if (!type && SNIFF_REASON[sniffed]) { rejected.push((f.name || 'ファイル') + '（' + SNIFF_REASON[sniffed] + '）'); continue; }
+      if (!type) type = ACCEPT.includes(f.type) ? f.type : (EXT[ext] || '');
+      if (!type) { rejected.push((f.name || 'ファイル') + '（画像の形式を判別できません）'); continue; }
+      let src = URL.createObjectURL(f);
       try {
-        const img = await loadImage(src);
+        let img;
+        try {
+          img = await loadImage(src);
+        } catch (decodeErr) {
+          // ブラウザが読めないGIFは、自前の読み取りで1コマ目を作る
+          if (type !== 'image/gif') throw decodeErr;
+          const g0 = parseGif(new Uint8Array(await f.arrayBuffer()));
+          const fr0 = g0.frames[0];
+          // 壊れたファイルを画像として通さないよう、中身が正しいかを確かめる
+          if (!fr0 || !g0.W || !g0.H || g0.W > 16384 || g0.H > 16384 || !(fr0.lct || g0.gct) ||
+              fr0.minCode < 2 || fr0.minCode > 8 || !fr0.total || fr0.x + fr0.w > g0.W || fr0.y + fr0.h > g0.H) throw decodeErr;
+          const first = renderGifFrames(g0, new Set([0])).get(0);
+          let opaque = 0;
+          for (let q = 3; q < first.length; q += 4) if (first[q]) opaque++;
+          if (opaque < first.length / 4 * 0.01) throw decodeErr;
+          const cv0 = document.createElement('canvas'); cv0.width = g0.W; cv0.height = g0.H;
+          cv0.getContext('2d').putImageData(new ImageData(first, g0.W, g0.H), 0, 0);
+          const pb = await canvasBlob(cv0, 'image/png');
+          URL.revokeObjectURL(src);
+          src = URL.createObjectURL(pb);
+          img = await loadImage(src);
+        }
         const entry = { id: 'f' + (++seq), name: f.name || ('pasted.' + typeLabel(type).toLowerCase()), type, size: f.size, file: f, src, dataURL: null, img, w: img.naturalWidth, h: img.naturalHeight, result: null };
         if (type === 'image/gif') {
           try {
             const g = parseGif(new Uint8Array(await f.arrayBuffer()));
             if (g.frames.length > 1 && g.W && g.H) {
-              entry.anim = { gif: g, count: g.frames.length, dur: g.frames.reduce((sum, fr) => sum + gifDelay(fr.delay), 0) };
+              const delays = g.frames.map((fr) => gifDelay(fr.delay));
+              entry.anim = { kind: 'gif', gif: g, count: g.frames.length, delays, dur: delays.reduce((x, y) => x + y, 0), W: g.W, H: g.H,
+                rep: g.loop === 0 ? 'indefinite' : g.loop < 0 ? 1 : g.loop + 1 };
               entry.w = g.W; entry.h = g.H;
+            }
+          } catch (err) { /* 読めなければ1枚の画像として扱う */ }
+        }
+        if (type === 'image/webp') {
+          try {
+            const w = parseWebpAnim(new Uint8Array(await f.arrayBuffer()));
+            if (w) {
+              const delays = w.frames.map((fr) => gifDelay(fr.duration));
+              entry.anim = { kind: 'webp', webp: w, count: w.frames.length, delays, dur: delays.reduce((x, y) => x + y, 0), W: w.W, H: w.H,
+                rep: w.loop === 0 ? 'indefinite' : w.loop };
+              entry.w = w.W; entry.h = w.H;
             }
           } catch (err) { /* 読めなければ1枚の画像として扱う */ }
         }
@@ -924,14 +1036,14 @@ textarea#code {
         if (!firstNew) firstNew = entry;
       } catch (err) {
         URL.revokeObjectURL(src);
-        rejected.push((f.name || '画像') + '（読み込み失敗）');
+        rejected.push((f.name || '画像') + '（' + typeLabel(type) + 'として読み込めませんでした。ファイルが壊れている可能性があります）');
       }
     }
     // 最初の実ファイルが入ったらサンプルは外す
     const sampleIdx = files.findIndex((x) => x.sample);
     if (firstNew && sampleIdx >= 0) removeFile(files[sampleIdx].id, true);
     renderFiles();
-    if (rejected.length) toast('変換できない形式です：' + rejected.slice(0, 3).join('、') + (rejected.length > 3 ? ' ほか' : '') + '（JPG・PNG・WEBP・GIF・PEFに対応）');
+    if (rejected.length) toast('読み込めませんでした：' + rejected.slice(0, 3).join('、') + (rejected.length > 3 ? ' ほか' + (rejected.length - 3) + '件' : '') + '。対応形式はJPG・PNG・WEBP・GIF・PEF・MP4・WebM・MOVです');
     if (firstNew) select(firstNew.id);
   }
   function removeFile(id, silent) {
@@ -941,6 +1053,8 @@ textarea#code {
     if (f.src && f.src.startsWith('blob:')) URL.revokeObjectURL(f.src);
     Object.values(f.cache || {}).forEach((r) => { if (r.url) URL.revokeObjectURL(r.url); });
     if (f.cutCache && f.cutCache.cut.src) URL.revokeObjectURL(f.cutCache.cut.src);
+    if (f.video) { try { f.video.removeAttribute('src'); f.video.load(); } catch (err) { /* 解放できなくても続ける */ } }
+    if (f.videoUrl) URL.revokeObjectURL(f.videoUrl);
     files.splice(i, 1);
     if (silent) return;
     if (activeId === id) {
@@ -956,7 +1070,7 @@ textarea#code {
     ul.innerHTML = files.map((f) =>
       '<li data-id="' + f.id + '" aria-current="' + (f.id === activeId) + '" tabindex="0">' +
       '<img class="thumb" alt="" src="' + esc(f.src) + '">' +
-      '<div style="min-width:0"><div class="nm">' + esc(f.name) + (f.sample ? '<span class="badge">サンプル</span>' : '') + (f.anim ? '<span class="badge anim">アニメ ' + f.anim.count + 'コマ</span>' : '') + '</div>' +
+      '<div style="min-width:0"><div class="nm">' + esc(f.name) + (f.sample ? '<span class="badge">サンプル</span>' : '') + (f.anim ? '<span class="badge anim">' + (f.anim.kind === 'video' ? '動画 ' + (f.anim.dur / 1000).toFixed(1) + '秒' : 'アニメ ' + f.anim.count + 'コマ') + '</span>' : '') + '</div>' +
       '<div class="meta">' + typeLabel(f.type) + ' · ' + f.w + '×' + f.h + ' · ' + fmtBytes(f.size) + '</div>' +
       statusChip(f) + '</div>' +
       '<button type="button" class="rm" data-rm="' + f.id + '" aria-label="' + esc(f.name) + ' を削除">×</button></li>'
@@ -1061,6 +1175,12 @@ textarea#code {
     const gen = ++convertGen;
     if (cur(f)) { showResult(f); return; }
     notice('');
+    // 前の画像の結果が残って見えないよう、表示をいったん空にする
+    $('#svgImg').removeAttribute('src');
+    ['#sSvg', '#sPaths', '#sColors', '#sTime'].forEach((x) => { $(x).textContent = '…'; });
+    $('#sOrig').innerHTML = fmtBytes(f.size) + '<small>' + f.w + '×' + f.h + '</small>';
+    $('#outName').textContent = baseName(f.name) + '.svg';
+    if (ui.view === 'code') $('#code').value = '';
     $('#busyText').textContent = settings.mode === 'embed' ? '埋め込み中…' : 'トレース中…';
     $('#busy').hidden = false;
     try {
@@ -1540,26 +1660,163 @@ textarea#code {
   }
   const gifDelay = (d) => (d <= 10 ? 100 : d); // ブラウザと同じく 0〜10ms は 100ms とみなす
   function isAnimated(f) { return !!(f && f.anim && settings.animate); }
-  function animKey(f) { return isAnimated(f) ? 'A' + settings.animStep + 'x' + settings.animMax : ''; }
-  // 間引き・最大コマ数から使うコマを選ぶ（再生時間は元のまま）
-  function selectFrames(g) {
-    const n = g.frames.length, step = settings.animStep, max = settings.animMax;
+  function animKey(f) {
+    if (!isAnimated(f)) return '';
+    return f.anim.kind === 'video' ? 'V' + settings.videoFps + 'x' + settings.animMax : 'A' + settings.animStep + 'x' + settings.animMax;
+  }
+  // 使うコマを選ぶ（再生時間は元のまま）。i はコマ番号、動画は t（秒）も持つ
+  function selectFrames(a) {
+    if (a.kind === 'video') {
+      let n = Math.max(1, Math.round(a.dur / 1000 * settings.videoFps));
+      if (settings.animMax && n > settings.animMax) n = settings.animMax;
+      const step = a.dur / n;
+      return Array.from({ length: n }, (_, k) => ({ i: k, t: Math.min(a.dur - 1, (k + 0.5) * step) / 1000, delay: step }));
+    }
+    const n = a.delays.length, stepN = settings.animStep, max = settings.animMax;
     let idx = [];
-    for (let i = 0; i < n; i += step) idx.push(i);
+    for (let i = 0; i < n; i += stepN) idx.push(i);
     if (max && idx.length > max) { const pick = []; for (let k = 0; k < max; k++) pick.push(idx[Math.floor(k * idx.length / max)]); idx = pick; }
-    const delays = g.frames.map((fr) => gifDelay(fr.delay));
     return idx.map((i, k) => {
       const until = k + 1 < idx.length ? idx[k + 1] : n;
-      let d = 0; for (let j = i; j < until; j++) d += delays[j];
+      let d = 0; for (let j = i; j < until; j++) d += a.delays[j];
       return { i, delay: d };
     });
   }
-  function repeatText(loop) { return loop === 0 ? '繰り返し再生' : loop < 0 ? '1回だけ再生' : (loop + 1) + '回再生'; }
+  function repeatText(rep) { return rep === 'indefinite' ? '繰り返し再生' : rep === 1 ? '1回だけ再生' : rep + '回再生'; }
+
+  /* ---------- WebPアニメ：RIFFの中のコマを取り出す ---------- */
+  function parseWebpAnim(u8) {
+    const s4 = (o) => String.fromCharCode(u8[o], u8[o + 1], u8[o + 2], u8[o + 3]);
+    if (u8.length < 30 || s4(0) !== 'RIFF' || s4(8) !== 'WEBP') return null;
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    const u24 = (o) => u8[o] | (u8[o + 1] << 8) | (u8[o + 2] << 16);
+    let p = 12, W = 0, H = 0, animated = false, loop = 0;
+    const frames = [];
+    while (p + 8 <= u8.length) {
+      const id = s4(p), size = dv.getUint32(p + 4, true), d = p + 8;
+      if (d + size > u8.length) break;
+      if (id === 'VP8X') { animated = !!(u8[d] & 0x02); W = u24(d + 4) + 1; H = u24(d + 7) + 1; }
+      else if (id === 'ANIM') loop = u8[d + 4] | (u8[d + 5] << 8);
+      else if (id === 'ANMF' && size >= 16) {
+        frames.push({ x: u24(d) * 2, y: u24(d + 3) * 2, w: u24(d + 6) + 1, h: u24(d + 9) + 1, duration: u24(d + 12),
+          noBlend: !!(u8[d + 15] & 0x02), dispose: !!(u8[d + 15] & 0x01), data: u8.subarray(d + 16, d + size) });
+      }
+      p = d + size + (size & 1);
+    }
+    if (!animated || frames.length < 2 || !W || !H) return null;
+    return { W, H, loop, frames };
+  }
+  // ANMFの中身を、ブラウザが読める1枚のWebPファイルにする
+  function webpFrameBlob(fr) {
+    const u8 = fr.data;
+    let p = 0, hasAlph = false;
+    while (p + 8 <= u8.length) {
+      const id = String.fromCharCode(u8[p], u8[p + 1], u8[p + 2], u8[p + 3]);
+      const size = u8[p + 4] | (u8[p + 5] << 8) | (u8[p + 6] << 16) | (u8[p + 7] << 24);
+      if (id === 'ALPH') hasAlph = true;
+      p += 8 + size + (size & 1);
+    }
+    const parts = [];
+    let total = 0;
+    if (hasAlph) {
+      const x = new Uint8Array(18);
+      x.set([0x56, 0x50, 0x38, 0x58, 10, 0, 0, 0, 0x10, 0, 0, 0]);
+      const w1 = fr.w - 1, h1 = fr.h - 1;
+      x[12] = w1 & 255; x[13] = (w1 >> 8) & 255; x[14] = (w1 >> 16) & 255;
+      x[15] = h1 & 255; x[16] = (h1 >> 8) & 255; x[17] = (h1 >> 16) & 255;
+      parts.push(x); total += x.length;
+    }
+    parts.push(u8); total += u8.length;
+    const head = new Uint8Array(12);
+    head.set([0x52, 0x49, 0x46, 0x46]);
+    new DataView(head.buffer).setUint32(4, 4 + total, true);
+    head.set([0x57, 0x45, 0x42, 0x50], 8);
+    return new Blob([head].concat(parts), { type: 'image/webp' });
+  }
+  async function decodeBlobImage(blob) {
+    if (window.createImageBitmap) { try { return await createImageBitmap(blob); } catch (err) { /* 下の方法で読む */ } }
+    const url = URL.createObjectURL(blob);
+    try { return await loadImage(url); } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
+  }
+  async function renderWebpFrames(w, want) {
+    const cv = document.createElement('canvas'); cv.width = w.W; cv.height = w.H;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    const out = new Map();
+    const last = Math.max.apply(null, Array.from(want));
+    let prev = null;
+    for (let i = 0; i < w.frames.length && i <= last; i++) {
+      const fr = w.frames[i];
+      if (prev && prev.dispose) ctx.clearRect(prev.x, prev.y, prev.w, prev.h);
+      const img = await decodeBlobImage(webpFrameBlob(fr));
+      if (fr.noBlend) ctx.clearRect(fr.x, fr.y, fr.w, fr.h);
+      ctx.drawImage(img, fr.x, fr.y);
+      if (img.close) img.close();
+      if (want.has(i)) out.set(i, ctx.getImageData(0, 0, w.W, w.H).data);
+      prev = fr;
+    }
+    return out;
+  }
+
+  /* ---------- 動画：再生位置を動かしてコマを切り出す ---------- */
+  const VIDEO_REASON = 'この動画の形式（コーデック）にはお使いのブラウザが対応していないか、この画面では動画を読み込めません。H.264のMP4かWebMに変換するか、単体のHTML版でお試しください';
+  function loadVideo(url) {
+    return new Promise((resolve, reject) => {
+      const v = document.createElement('video');
+      v.muted = true; v.playsInline = true; v.preload = 'auto';
+      const timer = setTimeout(() => reject(new Error('timeout')), 20000);
+      v.onloadeddata = () => { clearTimeout(timer); resolve(v); };
+      v.onerror = () => { clearTimeout(timer); reject(new Error('video')); };
+      v.src = url;
+    });
+  }
+  function seekVideo(v, t) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { v.removeEventListener('seeked', done); reject(new Error('seek')); }, 10000);
+      function done() { clearTimeout(timer); v.removeEventListener('seeked', done); resolve(); }
+      v.addEventListener('seeked', done);
+      v.currentTime = t;
+    });
+  }
+  async function videoDuration(v) {
+    if (isFinite(v.duration) && v.duration > 0) return v.duration;
+    // 長さが記録されていない動画は、末尾へ移動して長さを確かめる
+    try { await seekVideo(v, 1e7); } catch (err) { /* 失敗したら下で判定 */ }
+    const d = v.duration;
+    try { await seekVideo(v, 0); } catch (err) { /* 先頭へ戻せなくても続ける */ }
+    return isFinite(d) && d > 0 ? d : 0;
+  }
+  function videoCaptureSize(vw, vh) {
+    const cap = Math.min(1280, settings.maxSide > 0 ? Math.max(480, settings.maxSide) : 1280);
+    const s = Math.min(1, cap / Math.max(vw, vh));
+    return [Math.max(1, Math.round(vw * s)), Math.max(1, Math.round(vh * s))];
+  }
+  async function captureVideoFrame(f, t, W, H) {
+    const v = f.video;
+    await seekVideo(v, t);
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(v, 0, 0, W, H);
+    return ctx.getImageData(0, 0, W, H).data;
+  }
+
+  // コマを1枚ずつ取り出す仕組み（GIF・WebPは先にまとめて合成、動画はその都度切り出す）
+  async function animFrameSource(f, sel) {
+    const a = f.anim;
+    if (a.kind === 'video') {
+      const [W, H] = videoCaptureSize(a.W, a.H);
+      return { W, H, get: (k) => captureVideoFrame(f, sel[k].t, W, H) };
+    }
+    const want = new Set(sel.map((x) => x.i));
+    const map = a.kind === 'webp' ? await renderWebpFrames(a.webp, want) : renderGifFrames(a.gif, want);
+    return { W: a.W, H: a.H, get: async (k) => map.get(sel[k].i) };
+  }
 
   async function animFit(f, mode, gen) {
-    const g = f.anim.gif, W = g.W, H = g.H;
-    const sel = selectFrames(g);
-    const frames = renderGifFrames(g, new Set(sel.map((s) => s.i)));
+    const a = f.anim;
+    const sel = selectFrames(a);
+    $('#busyText').textContent = a.kind === 'video' ? '動画を読み込み中…' : 'コマを読み取り中…';
+    const source = await animFrameSource(f, sel);
+    const W = source.W, H = source.H;
     const n = sel.length;
     const budget = settings.limit ? Math.max(600, Math.floor((LIMIT - 300 - n * 230) / n)) : 0;
     const parts = [];
@@ -1568,7 +1825,8 @@ textarea#code {
       if (gen !== convertGen) throw cancelled();
       const label = 'コマ ' + (k + 1) + ' / ' + n;
       $('#busyText').textContent = label + ' を変換中…';
-      const rgba = frames.get(sel[k].i);
+      const rgba = await source.get(k);
+      if (gen !== convertGen) throw cancelled();
       let hasAlpha = false;
       for (let q = 3; q < rgba.length; q += 4) if (rgba[q] < 250) { hasAlpha = true; break; }
       const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
@@ -1582,7 +1840,14 @@ textarea#code {
       if (gen !== convertGen) throw cancelled();
       let r;
       if (mode === 'embed') {
-        if (!src.file) src.file = await canvasBlob(cv, 'image/png');
+        if (!src.file) {
+          // 動画のコマは写真に近いので、WebP（だめならJPEG）で軽くする。GIF・WebPアニメは色がくっきりしたPNGのまま
+          if (a.kind === 'video' && !hasAlpha) {
+            let fb = await canvasBlob(cv, 'image/webp', 0.82);
+            if (!fb || fb.type !== 'image/webp') fb = await canvasBlob(cv, 'image/jpeg', 0.85);
+            src.file = fb;
+          } else src.file = await canvasBlob(cv, 'image/png');
+        }
         r = await embedFit(src, gen, budget);
       } else {
         r = await traceFit(src, gen, mode, budget);
@@ -1599,7 +1864,7 @@ textarea#code {
       else parts.push({ body, tf, delay: sel[k].delay });
     }
     const total = parts.reduce((s, p) => s + p.delay, 0);
-    const rep = g.loop === 0 ? 'indefinite' : g.loop < 0 ? '1' : String(g.loop + 1);
+    const rep = String(a.rep);
     const fmt = (v) => +v.toFixed(5);
     let t = 0;
     const groups = parts.map((p, k) => {
@@ -1615,11 +1880,11 @@ textarea#code {
       }
       return '<g visibility="' + (k === 0 ? 'visible' : 'hidden') + '"' + p.tf + '>\n' + anim + p.body + '\n</g>';
     });
-    const svg = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">\n' + groups.join('\n') + '\n</svg>\n';
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="' + f.w + '" height="' + f.h + '" viewBox="0 0 ' + W + ' ' + H + '">\n' + groups.join('\n') + '\n</svg>\n';
     const bytes = svgBytes(svg);
     return {
       svg, paths, colors: mode === 'embed' ? null : colors, tracedW, tracedH,
-      anim: { total: g.frames.length, picked: n, used: parts.length, dur: total, loop: g.loop },
+      anim: { kind: a.kind, total: a.kind === 'video' ? null : a.count, picked: n, used: parts.length, dur: total, rep: a.rep, fps: a.kind === 'video' ? n / (total / 1000) : null },
       animBg: settings.removeBg ? { ratio: bgRatio, colors: bgColors, lasso: usesLasso(f) } : null,
       fit: settings.limit && (adjusted || bytes > LIMIT) ? { kind: 'anim', ok: bytes <= LIMIT, perFrame: budget } : null
     };
@@ -1693,10 +1958,15 @@ textarea#code {
     }
     if (r.anim) {
       const a = r.anim;
-      tips.push('アニメーション：元の' + a.total + 'コマから' + a.picked + 'コマを使い、' + a.used + 'コマのSVGアニメにしました' +
-        (a.used < a.picked ? '（同じ絵が続くコマはまとめています）' : '') + '。1周 ' + (a.dur / 1000).toFixed(1) + '秒・' + repeatText(a.loop) + '。');
+      const merged = a.used < a.picked ? '（同じ絵が続くコマはまとめています）' : '';
+      if (a.kind === 'video') {
+        tips.push('アニメーション：動画（' + (a.dur / 1000).toFixed(1) + '秒）から' + a.picked + 'コマを切り出し（1秒あたり約' + a.fps.toFixed(1) + 'コマ）、' + a.used + 'コマのSVGアニメにしました' + merged + '。' + repeatText(a.rep) + '。' +
+          (a.fps < settings.videoFps - 0.05 ? '最大コマ数に合わせて、切り出す間隔を広げています。' : '') + '音声は含まれません。');
+      } else {
+        tips.push('アニメーション：元の' + a.total + 'コマから' + a.picked + 'コマを使い、' + a.used + 'コマのSVGアニメにしました' + merged + '。1周 ' + (a.dur / 1000).toFixed(1) + '秒・' + repeatText(a.rep) + '。');
+      }
       if (r.animBg) tips.push('背景透過：コマごとに' + (r.animBg.lasso ? '線で囲んだ範囲で' : '外周の色から') + '切り抜き、平均で画像の' + Math.round(r.animBg.ratio * 100) + '%を透明にしました' + (settings.bgCrop ? '（アニメーションではコマの大きさを揃えるため、余白は切り詰めません）' : '') + '。');
-    } else if (f.anim) tips.push('「アニメーションとして変換」がオフのため、最初のコマだけを変換しています。');
+    } else if (f.anim) tips.push('「アニメーション・動画として変換」がオフのため、最初のコマだけを変換しています。');
     if (f.pef) tips.push('PEFはRAWデータを現像せず、ファイルに記録されたプレビューJPEG（' + f.w + '×' + f.h + 'px）を変換しています。');
     if (r.mode !== settings.mode) tips.push('一括変換中：「' + MODE_LABEL[r.mode] + '」方式の結果を表示しています。');
     if (!settings.limit && r.mode !== 'embed' && r.bytes > 3000000) tips.push('SVGが大きくなっています。色数を減らすか、ノイズ除去を上げるか、トレース解像度を下げると軽くなります。');
@@ -1941,16 +2211,23 @@ textarea#code {
     $('#animOpts').hidden = !settings.animate;
     $('#animStep').value = String(settings.animStep);
     $('#animMax').value = String(settings.animMax);
+    $('#videoFps').value = String(settings.videoFps);
+    $('#rowStep').hidden = !files.some((x) => x.anim && x.anim.kind !== 'video');
+    $('#rowFps').hidden = !files.some((x) => x.anim && x.anim.kind === 'video');
     const f = active();
     let note;
-    if (f && f.anim) {
-      const sel = selectFrames(f.anim.gif);
-      note = '「' + f.name + '」：' + f.anim.count + 'コマ・1周' + (f.anim.dur / 1000).toFixed(1) + '秒。このうち' + sel.length + 'コマを変換します。間引くほど軽くなり、動きは粗くなります（再生時間は変わりません）。';
-    } else note = '選択中の画像はアニメーションではありません。アニメーションのGIFを選ぶとコマ数を確認できます。';
+    if (f && f.anim && f.anim.kind === 'video') {
+      const n = selectFrames(f.anim).length;
+      note = '「' + f.name + '」：動画 ' + (f.anim.dur / 1000).toFixed(1) + '秒（' + f.anim.W + '×' + f.anim.H + '）。' + n + 'コマを切り出して変換します（1秒あたり約' + (n / (f.anim.dur / 1000)).toFixed(1) + 'コマ）。音声は含まれません。';
+    } else if (f && f.anim) {
+      const n = selectFrames(f.anim).length;
+      note = '「' + f.name + '」：' + f.anim.count + 'コマ・1周' + (f.anim.dur / 1000).toFixed(1) + '秒。このうち' + n + 'コマを変換します。間引くほど軽くなり、動きは粗くなります（再生時間は変わりません）。';
+    } else note = '選択中の画像はアニメーションではありません。GIF・WebPアニメや動画を選ぶとコマ数を確認できます。';
     $('#animNote').textContent = note;
   }
   $('#animToggle').addEventListener('change', (e) => { settings.animate = e.target.checked; saveAnimPrefs(); syncControls(); convert(); });
   $('#animStep').addEventListener('change', (e) => { settings.animStep = Number(e.target.value); saveAnimPrefs(); syncControls(); convert(); });
+  $('#videoFps').addEventListener('change', (e) => { settings.videoFps = Number(e.target.value); saveAnimPrefs(); syncControls(); convert(); });
   $('#animMax').addEventListener('change', (e) => { settings.animMax = Number(e.target.value); saveAnimPrefs(); syncControls(); convert(); });
   $('#bgToggle').addEventListener('change', (e) => {
     settings.removeBg = e.target.checked; saveBgPrefs(); syncControls();
