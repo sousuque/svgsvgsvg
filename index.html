@@ -452,6 +452,7 @@ textarea#code {
             </select>
           </div>
           <p class="mode-note" id="animNote"></p>
+          <p class="mode-note">アニメーション・動画を選ぶと、「変換方式」と「50KB以内に収める」はアニメーション用の設定に切り替わります（初期設定：埋め込み・50KB以内）。ここで変えた設定は、ほかのアニメーションにも使われます。ふつうの画像に戻ると、その設定に戻ります。</p>
         </div>
       </section>
 
@@ -621,15 +622,43 @@ textarea#code {
   try {
     const an = JSON.parse(localStorage.getItem('svgtrace.anim') || 'null');
     if (an) {
-      settings.animate = an.on !== false;
-      if ([1, 2, 3, 4].includes(an.step)) settings.animStep = an.step;
-      if ([10, 20, 30, 60, 120].includes(an.max)) settings.animMax = an.max;
       if ([5, 8, 10, 12, 15, 24].includes(an.fps)) settings.videoFps = an.fps;
     }
   } catch (err) { /* 保存領域なし */ }
   function saveAnimPrefs() {
     try { localStorage.setItem('svgtrace.anim', JSON.stringify({ on: settings.animate, step: settings.animStep, max: settings.animMax, fps: settings.videoFps })); } catch (err) { /* 保存領域なし */ }
   }
+  /* ---------- ふつうの画像用とアニメーション用の設定 ----------
+     「変換方式」と「50KB以内に収める」は、選んだファイルに合わせて切り替える。
+     アニメーション（GIF・WebPアニメ・動画）の初期設定：埋め込み・50KB以内 */
+  const ANIM_DEFAULTS = { mode: 'embed', limit: true };
+  const profiles = { still: { mode: settings.mode, limit: settings.limit }, anim: Object.assign({}, ANIM_DEFAULTS) };
+  let currentProfile = 'still';
+  let animProfileNoticed = false;
+  const profileOf = (f) => (f && f.anim ? 'anim' : 'still');
+  // そのファイルを変換するときの「50KB以内に収める」
+  function limitOn(f) {
+    const k = profileOf(f);
+    return k === currentProfile ? settings.limit : profiles[k].limit;
+  }
+  function applyProfileFor(f) {
+    const want = profileOf(f);
+    if (want === currentProfile) return false;
+    profiles[currentProfile] = { mode: settings.mode, limit: settings.limit };
+    settings.mode = profiles[want].mode;
+    settings.limit = profiles[want].limit;
+    currentProfile = want;
+    if (want === 'anim') {
+      // 「アニメーション・動画として変換」「間引かない」「30コマ」は、ページを開いたときの初期設定
+      if (!animProfileNoticed) {
+        animProfileNoticed = true;
+        toast('アニメーション用の設定（埋め込み・50KB以内・間引かない・30コマ）に切り替えました');
+      }
+    }
+    syncControls();
+    return true;
+  }
+  let activeLimit = false; // 変換中のファイルに使う「50KB以内」（computeResult で決める）
   function saveBgPrefs() {
     try { localStorage.setItem('svgtrace.bg', JSON.stringify({ on: settings.removeBg, tol: settings.bgTol, inner: settings.bgInner, crop: settings.bgCrop, method: settings.bgMethod, refine: settings.lassoRefine })); } catch (err) { /* 保存領域なし */ }
   }
@@ -1090,7 +1119,7 @@ textarea#code {
     MODES.forEach((m) => {
       const r = resultFor(f, m);
       if (!r) return;
-      const over = settings.limit && r.bytes > LIMIT;
+      const over = limitOn(f) && r.bytes > LIMIT;
       chips.push('<span class="st ' + (over ? 'err' : 'ok') + '">' + MODE_LABEL[m] + ' ' + fmtBytes(r.bytes) + (over ? ' 超過' : '') + '</span>');
     });
     return chips.length ? '<div class="stline">' + chips.join(' ') + '</div>' : '';
@@ -1100,6 +1129,7 @@ textarea#code {
   function select(id) {
     if (ui.drawing) exitDraw();
     activeId = id;
+    applyProfileFor(active());
     renderFiles();
     const f = active();
     if (!f) { showEmpty(); return; }
@@ -1115,8 +1145,9 @@ textarea#code {
   function settingsKey(mode, f) {
     const s = settings;
     mode = mode || s.mode;
-    if (mode === 'embed') return 'embed|' + s.limit + '|' + bgKey(f) + '|' + animKey(f);
-    const common = [mode, s.omit, s.precision, s.blur, s.maxSide, s.fillGaps, s.limit, bgKey(f), animKey(f)];
+    const lim = limitOn(f);
+    if (mode === 'embed') return 'embed|' + lim + '|' + bgKey(f) + '|' + animKey(f);
+    const common = [mode, s.omit, s.precision, s.blur, s.maxSide, s.fillGaps, lim, bgKey(f), animKey(f)];
     if (mode === 'mono') common.push(s.threshold, s.ink, s.transparentBg);
     else common.push(s.colors);
     return common.join('|');
@@ -1133,6 +1164,7 @@ textarea#code {
   async function computeResult(f, mode, gen) {
     const started = performance.now();
     const key = settingsKey(mode, f);
+    activeLimit = limitOn(f);
     if (mode !== 'embed' && !window.ImageTracer) throw new Error('lib');
     if (isAnimated(f)) {
       const res = await animFit(f, mode, gen);
@@ -1465,7 +1497,7 @@ textarea#code {
       side: settings.maxSide > 0 ? Math.min(settings.maxSide, full) : full
     };
     const first = await traceOnce(f, p, gen);
-    if (!settings.limit || first.bytes <= budget) return first;
+    if (!activeLimit || first.bytes <= budget) return first;
     let best = first, last = first, tries = 1;
     while (tries < 12 && last.bytes > budget) {
       if (p.round === 1) {
@@ -1510,7 +1542,7 @@ textarea#code {
     if (!f.dataURL) f.dataURL = await fileToDataURL(f.file);
     const svg0 = embedSVG(f.w, f.h, f.dataURL);
     const first = { svg: svg0, bytes: svgBytes(svg0), paths: 0, colors: null, tracedW: f.w, tracedH: f.h };
-    if (!settings.limit || first.bytes <= budget) return first;
+    if (!activeLimit || first.bytes <= budget) return first;
     const alpha = imageHasAlpha(f);
     let scale = Math.min(1, 1600 / Math.max(f.w, f.h)), q = 0.85, tries = 0, best = null;
     while (tries < 24) {
@@ -1818,7 +1850,7 @@ textarea#code {
     const source = await animFrameSource(f, sel);
     const W = source.W, H = source.H;
     const n = sel.length;
-    const budget = settings.limit ? Math.max(600, Math.floor((LIMIT - 300 - n * 230) / n)) : 0;
+    const budget = activeLimit ? Math.max(600, Math.floor((LIMIT - 300 - n * 230) / n)) : 0;
     const parts = [];
     let paths = 0, colors = 0, tracedW = W, tracedH = H, bgRatio = 0, bgColors = [], adjusted = false;
     for (let k = 0; k < n; k++) {
@@ -1886,7 +1918,7 @@ textarea#code {
       svg, paths, colors: mode === 'embed' ? null : colors, tracedW, tracedH,
       anim: { kind: a.kind, total: a.kind === 'video' ? null : a.count, picked: n, used: parts.length, dur: total, rep: a.rep, fps: a.kind === 'video' ? n / (total / 1000) : null },
       animBg: settings.removeBg ? { ratio: bgRatio, colors: bgColors, lasso: usesLasso(f) } : null,
-      fit: settings.limit && (adjusted || bytes > LIMIT) ? { kind: 'anim', ok: bytes <= LIMIT, perFrame: budget } : null
+      fit: activeLimit && (adjusted || bytes > LIMIT) ? { kind: 'anim', ok: bytes <= LIMIT, perFrame: budget } : null
     };
   }
 
@@ -1923,7 +1955,7 @@ textarea#code {
     $('#svgImg').src = r.url;
     $('#sOrig').innerHTML = fmtBytes(f.size) + '<small>' + f.w + '×' + f.h + '</small>';
     let ratio = '';
-    if (settings.limit) {
+    if (limitOn(f)) {
       ratio = r.bytes <= LIMIT ? '<small class="down">✓ 50KB以内</small>' : '<small class="up">50KB超</small>';
     } else if (f.size) {
       const k = r.bytes / f.size;
@@ -1969,7 +2001,7 @@ textarea#code {
     } else if (f.anim) tips.push('「アニメーション・動画として変換」がオフのため、最初のコマだけを変換しています。');
     if (f.pef) tips.push('PEFはRAWデータを現像せず、ファイルに記録されたプレビューJPEG（' + f.w + '×' + f.h + 'px）を変換しています。');
     if (r.mode !== settings.mode) tips.push('一括変換中：「' + MODE_LABEL[r.mode] + '」方式の結果を表示しています。');
-    if (!settings.limit && r.mode !== 'embed' && r.bytes > 3000000) tips.push('SVGが大きくなっています。色数を減らすか、ノイズ除去を上げるか、トレース解像度を下げると軽くなります。');
+    if (!limitOn(f) && r.mode !== 'embed' && r.bytes > 3000000) tips.push('SVGが大きくなっています。色数を減らすか、ノイズ除去を上げるか、トレース解像度を下げると軽くなります。');
     if (r.mode !== 'embed' && r.paths === 0) tips.push('図形が見つかりませんでした。白黒方式ならしきい値を、カラー方式ならノイズ除去を下げてみてください。');
     notice(tips.join(' '), r.fit && !r.fit.ok ? 'err' : (r.fit ? 'ok' : ''));
     $('#saveBtn').disabled = false; $('#copyBtn').disabled = false;
@@ -2201,7 +2233,7 @@ textarea#code {
   $('#fillGaps').addEventListener('change', (e) => { settings.fillGaps = e.target.checked; convert(); });
   $('#limitToggle').addEventListener('change', (e) => {
     settings.limit = e.target.checked;
-    try { localStorage.setItem('svgtrace.limit50', settings.limit ? '1' : '0'); } catch (err) { /* 保存領域なし */ }
+    if (currentProfile === 'still') { try { localStorage.setItem('svgtrace.limit50', settings.limit ? '1' : '0'); } catch (err) { /* 保存領域なし */ } }
     convert();
   });
   function syncAnimUI() {
@@ -2412,7 +2444,7 @@ textarea#code {
       notes.push(files.length + '枚 × ' + modes.length + '方式 = ' + tasks.length + 'ファイル' + (modes.length > 1 ? '。ZIPの中は方式ごとのフォルダ（' + modes.map((m) => ZIP_DIR[m] + '/').join('・') + '）に分かれます' : '') + '。');
       if (modes.length > 1) notes.push('どの方式も、いまの調整値（ノイズ除去・単純化など）で同じように処理します。白黒のしきい値などは、上の「変換方式」を切り替えると設定できます。');
       if (done.length && remaining) notes.push('未変換の' + remaining + '件はZIPに入りません。');
-      if (settings.limit && done.some((t) => t.r.bytes > LIMIT)) notes.push('50KBに収まらなかったファイルがあります（赤い表示）。');
+      if (done.some((t) => limitOn(t.f) && t.r.bytes > LIMIT)) notes.push('50KBに収まらなかったファイルがあります（赤い表示）。');
     }
     $('#batchNote').textContent = notes.join(' ');
     $('#batchNote').hidden = !notes.length;
@@ -2460,6 +2492,7 @@ textarea#code {
     const b = batch;
     batch = null;
     setLocked(false);
+    applyProfileFor(active());
     $('#busy').hidden = true;
     renderFiles();
     const a = active();
