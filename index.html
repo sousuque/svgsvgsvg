@@ -153,6 +153,7 @@ progress { width: 100%; height: 8px; accent-color: var(--accent); }
 .batch-note { margin: 0; font-size: .76rem; color: var(--muted); }
 .switch input:disabled + .sw-track { opacity: .5; }
 .switch:has(input:disabled) { cursor: not-allowed; }
+.badge.anim { background: var(--accent-soft); color: var(--accent); }
 .badge { font-size: .65rem; font-weight: 700; padding: 0 6px; border-radius: 4px; background: var(--warn-soft); color: var(--warn); margin-left: 4px; vertical-align: 1px; }
 
 /* Segmented mode switch */
@@ -409,6 +410,39 @@ textarea#code {
         </div>
       </section>
 
+      <section class="sec" id="secAnim" hidden>
+        <label class="switch" for="animToggle">
+          <span class="sw-text">
+            <strong>アニメーションとして変換</strong>
+            <small>GIFアニメのコマをそれぞれ変換し、動くSVGにします</small>
+          </span>
+          <input type="checkbox" role="switch" id="animToggle">
+          <span class="sw-track" aria-hidden="true"><span class="sw-thumb"></span></span>
+        </label>
+        <div class="bg-opts" id="animOpts">
+          <div class="row">
+            <label for="animStep">コマを間引く</label>
+            <select id="animStep">
+              <option value="1">間引かない</option>
+              <option value="2">2コマに1枚</option>
+              <option value="3">3コマに1枚</option>
+              <option value="4">4コマに1枚</option>
+            </select>
+          </div>
+          <div class="row">
+            <label for="animMax">最大コマ数</label>
+            <select id="animMax">
+              <option value="10">10コマ</option>
+              <option value="20">20コマ</option>
+              <option value="30">30コマ</option>
+              <option value="60">60コマ</option>
+              <option value="120">120コマ</option>
+            </select>
+          </div>
+          <p class="mode-note" id="animNote"></p>
+        </div>
+      </section>
+
       <section class="sec" id="secPreset">
         <h2>プリセット</h2>
         <div class="chips" id="presets">
@@ -557,7 +591,8 @@ textarea#code {
     colors: 16, omit: 8, precision: 1, blur: 0, maxSide: 1000,
     threshold: 128, ink: '#1c2321', transparentBg: true, fillGaps: true,
     limit: false,
-    removeBg: false, bgTol: 32, bgInner: false, bgCrop: false, bgMethod: 'auto', lassoRefine: true
+    removeBg: false, bgTol: 32, bgInner: false, bgCrop: false, bgMethod: 'auto', lassoRefine: true,
+    animate: true, animStep: 1, animMax: 30
   };
   try {
     settings.limit = localStorage.getItem('svgtrace.limit50') === '1';
@@ -569,6 +604,17 @@ textarea#code {
       if (bg.refine === false) settings.lassoRefine = false;
     }
   } catch (err) { /* 保存領域なし */ }
+  try {
+    const an = JSON.parse(localStorage.getItem('svgtrace.anim') || 'null');
+    if (an) {
+      settings.animate = an.on !== false;
+      if ([1, 2, 3, 4].includes(an.step)) settings.animStep = an.step;
+      if ([10, 20, 30, 60, 120].includes(an.max)) settings.animMax = an.max;
+    }
+  } catch (err) { /* 保存領域なし */ }
+  function saveAnimPrefs() {
+    try { localStorage.setItem('svgtrace.anim', JSON.stringify({ on: settings.animate, step: settings.animStep, max: settings.animMax })); } catch (err) { /* 保存領域なし */ }
+  }
   function saveBgPrefs() {
     try { localStorage.setItem('svgtrace.bg', JSON.stringify({ on: settings.removeBg, tol: settings.bgTol, inner: settings.bgInner, crop: settings.bgCrop, method: settings.bgMethod, refine: settings.lassoRefine })); } catch (err) { /* 保存領域なし */ }
   }
@@ -865,6 +911,15 @@ textarea#code {
       try {
         const img = await loadImage(src);
         const entry = { id: 'f' + (++seq), name: f.name || ('pasted.' + typeLabel(type).toLowerCase()), type, size: f.size, file: f, src, dataURL: null, img, w: img.naturalWidth, h: img.naturalHeight, result: null };
+        if (type === 'image/gif') {
+          try {
+            const g = parseGif(new Uint8Array(await f.arrayBuffer()));
+            if (g.frames.length > 1 && g.W && g.H) {
+              entry.anim = { gif: g, count: g.frames.length, dur: g.frames.reduce((sum, fr) => sum + gifDelay(fr.delay), 0) };
+              entry.w = g.W; entry.h = g.H;
+            }
+          } catch (err) { /* 読めなければ1枚の画像として扱う */ }
+        }
         files.push(entry);
         if (!firstNew) firstNew = entry;
       } catch (err) {
@@ -901,13 +956,15 @@ textarea#code {
     ul.innerHTML = files.map((f) =>
       '<li data-id="' + f.id + '" aria-current="' + (f.id === activeId) + '" tabindex="0">' +
       '<img class="thumb" alt="" src="' + esc(f.src) + '">' +
-      '<div style="min-width:0"><div class="nm">' + esc(f.name) + (f.sample ? '<span class="badge">サンプル</span>' : '') + '</div>' +
+      '<div style="min-width:0"><div class="nm">' + esc(f.name) + (f.sample ? '<span class="badge">サンプル</span>' : '') + (f.anim ? '<span class="badge anim">アニメ ' + f.anim.count + 'コマ</span>' : '') + '</div>' +
       '<div class="meta">' + typeLabel(f.type) + ' · ' + f.w + '×' + f.h + ' · ' + fmtBytes(f.size) + '</div>' +
       statusChip(f) + '</div>' +
       '<button type="button" class="rm" data-rm="' + f.id + '" aria-label="' + esc(f.name) + ' を削除">×</button></li>'
     ).join('');
     $('#fileCount').textContent = files.length ? files.length + '件' : '';
     updateBatchUI();
+    syncAnimUI();
+    syncLassoUI();
   }
   const MODES = ['color', 'mono', 'embed'];
   const MODE_LABEL = { color: 'カラー', mono: '白黒', embed: '埋込' };
@@ -944,8 +1001,8 @@ textarea#code {
   function settingsKey(mode, f) {
     const s = settings;
     mode = mode || s.mode;
-    if (mode === 'embed') return 'embed|' + s.limit + '|' + bgKey(f);
-    const common = [mode, s.omit, s.precision, s.blur, s.maxSide, s.fillGaps, s.limit, bgKey(f)];
+    if (mode === 'embed') return 'embed|' + s.limit + '|' + bgKey(f) + '|' + animKey(f);
+    const common = [mode, s.omit, s.precision, s.blur, s.maxSide, s.fillGaps, s.limit, bgKey(f), animKey(f)];
     if (mode === 'mono') common.push(s.threshold, s.ink, s.transparentBg);
     else common.push(s.colors);
     return common.join('|');
@@ -963,6 +1020,11 @@ textarea#code {
     const started = performance.now();
     const key = settingsKey(mode, f);
     if (mode !== 'embed' && !window.ImageTracer) throw new Error('lib');
+    if (isAnimated(f)) {
+      const res = await animFit(f, mode, gen);
+      const blob = new Blob([res.svg], { type: 'image/svg+xml' });
+      return Object.assign(res, { key, mode, srcW: f.w, srcH: f.h, bg: null, bytes: blob.size, url: URL.createObjectURL(blob), ms: performance.now() - started });
+    }
     let src = f;
     if (settings.removeBg) {
       $('#busyText').textContent = '背景を切り抜き中…';
@@ -1274,7 +1336,8 @@ textarea#code {
   }
 
   // 50KBを超えたら、座標の丸め → 解像度・色数・ノイズ除去・単純化 の順で段階的に軽くして再トレース
-  async function traceFit(f, gen, mode) {
+  async function traceFit(f, gen, mode, budget) {
+    budget = budget || LIMIT;
     const full = Math.max(f.w, f.h);
     const p = {
       mode: mode, colors: settings.colors, omit: settings.omit, precision: settings.precision,
@@ -1282,13 +1345,13 @@ textarea#code {
       side: settings.maxSide > 0 ? Math.min(settings.maxSide, full) : full
     };
     const first = await traceOnce(f, p, gen);
-    if (!settings.limit || first.bytes <= LIMIT) return first;
+    if (!settings.limit || first.bytes <= budget) return first;
     let best = first, last = first, tries = 1;
-    while (tries < 12 && last.bytes > LIMIT) {
+    while (tries < 12 && last.bytes > budget) {
       if (p.round === 1) {
         p.round = 0;
       } else {
-        const k = Math.max(0.45, Math.min(0.88, 0.95 / Math.sqrt(last.bytes / LIMIT)));
+        const k = Math.max(0.45, Math.min(0.88, 0.95 / Math.sqrt(last.bytes / budget)));
         p.side = Math.max(48, Math.round(p.side * k));
         if (p.mode === 'color') p.colors = Math.max(2, Math.round(p.colors * Math.max(0.6, k)));
         p.omit = Math.min(200, Math.max(p.omit + 4, Math.round(p.omit * 1.3)));
@@ -1299,7 +1362,7 @@ textarea#code {
       last = await traceOnce(f, p, gen);
       if (last.bytes < best.bytes) best = last;
     }
-    best.fit = { kind: 'trace', from: first.p, firstBytes: first.bytes, tries, ok: best.bytes <= LIMIT };
+    best.fit = { kind: 'trace', from: first.p, firstBytes: first.bytes, tries, ok: best.bytes <= budget };
     return best;
   }
 
@@ -1322,11 +1385,12 @@ textarea#code {
   }
 
   // 埋め込み方式：50KBを超えたらWEBP（非対応ならJPEG/PNG）に再圧縮し、品質→サイズの順に下げる
-  async function embedFit(f, gen) {
+  async function embedFit(f, gen, budget) {
+    budget = budget || LIMIT;
     if (!f.dataURL) f.dataURL = await fileToDataURL(f.file);
     const svg0 = embedSVG(f.w, f.h, f.dataURL);
     const first = { svg: svg0, bytes: svgBytes(svg0), paths: 0, colors: null, tracedW: f.w, tracedH: f.h };
-    if (!settings.limit || first.bytes <= LIMIT) return first;
+    if (!settings.limit || first.bytes <= budget) return first;
     const alpha = imageHasAlpha(f);
     let scale = Math.min(1, 1600 / Math.max(f.w, f.h)), q = 0.85, tries = 0, best = null;
     while (tries < 24) {
@@ -1351,19 +1415,224 @@ textarea#code {
       const svg = embedSVG(f.w, f.h, await fileToDataURL(blob));
       const cur = { svg, bytes: svgBytes(svg), paths: 0, colors: null, tracedW: tw, tracedH: th, enc: { fmt, q: fmt === 'PNG' ? null : q, w: tw, h: th } };
       if (!best || cur.bytes < best.bytes) best = cur;
-      if (cur.bytes <= LIMIT) break;
+      if (cur.bytes <= budget) break;
       if (fmt !== 'PNG' && q > 0.5) q = Math.round((q - 0.15) * 100) / 100;
-      else scale *= Math.max(0.5, Math.min(0.85, Math.sqrt(LIMIT / cur.bytes)));
+      else scale *= Math.max(0.5, Math.min(0.85, Math.sqrt(budget / cur.bytes)));
     }
     if (gen !== convertGen) throw cancelled();
     if (!best) return first;
-    best.fit = { kind: 'embed', firstBytes: first.bytes, tries, ok: best.bytes <= LIMIT };
+    best.fit = { kind: 'embed', firstBytes: first.bytes, tries, ok: best.bytes <= budget };
     return best;
+  }
+
+  /* ---------- GIFアニメ：ブラウザに頼らず全コマを読み取る ---------- */
+  function parseGif(u8) {
+    if (!(u8[0] === 0x47 && u8[1] === 0x49 && u8[2] === 0x46)) throw new Error('notgif');
+    let p = 6;
+    const W = u8[p] | (u8[p + 1] << 8), H = u8[p + 2] | (u8[p + 3] << 8), packed = u8[p + 4];
+    p += 7;
+    let gct = null;
+    if (packed & 0x80) { const n = 2 << (packed & 7); gct = u8.subarray(p, p + 3 * n); p += 3 * n; }
+    const frames = [];
+    let gce = null, loop = -1;
+    const readSub = () => {
+      const parts = []; let total = 0;
+      while (p < u8.length) { const n = u8[p++]; if (!n) break; parts.push(u8.subarray(p, p + n)); total += n; p += n; }
+      return { parts, total };
+    };
+    while (p < u8.length) {
+      const b = u8[p++];
+      if (b === 0x3B) break; // 終端
+      if (b === 0x21) {
+        const label = u8[p++];
+        if (label === 0xF9) {
+          const size = u8[p], pk = u8[p + 1];
+          gce = { disposal: (pk >> 2) & 7, transparent: (pk & 1) ? u8[p + 4] : -1, delay: (u8[p + 2] | (u8[p + 3] << 8)) * 10 };
+          p += 1 + size; readSub();
+        } else if (label === 0xFF) {
+          const size = u8[p];
+          const id = String.fromCharCode.apply(null, u8.subarray(p + 1, p + 1 + size));
+          p += 1 + size;
+          const sub = readSub();
+          if (/^(NETSCAPE|ANIMEXTS)/.test(id) && sub.parts[0] && sub.parts[0][0] === 1) loop = sub.parts[0][1] | (sub.parts[0][2] << 8);
+        } else readSub();
+      } else if (b === 0x2C) {
+        const x = u8[p] | (u8[p + 1] << 8), y = u8[p + 2] | (u8[p + 3] << 8), w = u8[p + 4] | (u8[p + 5] << 8), h = u8[p + 6] | (u8[p + 7] << 8), pk = u8[p + 8];
+        p += 9;
+        let lct = null;
+        if (pk & 0x80) { const n = 2 << (pk & 7); lct = u8.subarray(p, p + 3 * n); p += 3 * n; }
+        const minCode = u8[p++];
+        const sub = readSub();
+        frames.push({ x, y, w, h, lct, interlaced: !!(pk & 0x40), minCode, parts: sub.parts, total: sub.total,
+          disposal: gce ? gce.disposal : 0, delay: gce ? gce.delay : 0, transparent: gce ? gce.transparent : -1 });
+        gce = null;
+      } else break;
+    }
+    return { W, H, gct, frames, loop };
+  }
+  function lzwDecode(minCodeSize, data, pixelCount) {
+    const out = new Uint8Array(pixelCount);
+    const clear = 1 << minCodeSize, eoi = clear + 1;
+    let codeSize = minCodeSize + 1, codeMask = (1 << codeSize) - 1, next = eoi + 1;
+    const prefix = new Int16Array(4096), suffix = new Uint8Array(4096), stack = new Uint8Array(4097);
+    for (let i = 0; i < clear; i++) { prefix[i] = -1; suffix[i] = i; }
+    let datum = 0, bits = 0, pos = 0, op = 0, old = -1, first = 0;
+    while (op < pixelCount) {
+      while (bits < codeSize) { if (pos >= data.length) return out; datum |= data[pos++] << bits; bits += 8; }
+      let code = datum & codeMask;
+      datum >>>= codeSize; bits -= codeSize;
+      if (code === clear) { codeSize = minCodeSize + 1; codeMask = (1 << codeSize) - 1; next = eoi + 1; old = -1; continue; }
+      if (code === eoi) break;
+      if (old === -1) { if (code >= clear) break; out[op++] = code; old = code; first = code; continue; }
+      const inCode = code;
+      let sp = 0;
+      if (code >= next) { stack[sp++] = first; code = old; }
+      while (code > eoi) { stack[sp++] = suffix[code]; code = prefix[code]; }
+      first = code; stack[sp++] = first;
+      while (sp > 0 && op < pixelCount) out[op++] = stack[--sp];
+      if (next < 4096) {
+        prefix[next] = old; suffix[next] = first; next++;
+        if ((next & codeMask) === 0 && next < 4096) { codeSize++; codeMask = (1 << codeSize) - 1; }
+      }
+      old = inCode;
+    }
+    return out;
+  }
+  // 指定したコマ番号の、重ね合わせ後の全体画像（RGBA）を返す
+  function renderGifFrames(g, want) {
+    const W = g.W, H = g.H;
+    let cur = new Uint8ClampedArray(W * H * 4);
+    const out = new Map();
+    const last = Math.max.apply(null, Array.from(want));
+    for (let i = 0; i < g.frames.length && i <= last; i++) {
+      const fr = g.frames[i];
+      const saved = fr.disposal === 3 ? cur.slice() : null;
+      const pal = fr.lct || g.gct;
+      if (pal && fr.w && fr.h) {
+        const data = new Uint8Array(fr.total);
+        let o = 0;
+        for (const part of fr.parts) { data.set(part, o); o += part.length; }
+        const idx = lzwDecode(fr.minCode, data, fr.w * fr.h);
+        let rows;
+        if (fr.interlaced) {
+          rows = [];
+          [[0, 8], [4, 8], [2, 4], [1, 2]].forEach(([s0, st]) => { for (let r = s0; r < fr.h; r += st) rows.push(r); });
+        }
+        for (let r = 0; r < fr.h; r++) {
+          const yy = fr.y + (rows ? rows[r] : r);
+          if (yy >= H) continue;
+          for (let c = 0; c < fr.w; c++) {
+            const xx = fr.x + c;
+            if (xx >= W) continue;
+            const ci = idx[r * fr.w + c];
+            if (ci === fr.transparent || ci * 3 + 2 >= pal.length) continue;
+            const q = (yy * W + xx) * 4;
+            cur[q] = pal[ci * 3]; cur[q + 1] = pal[ci * 3 + 1]; cur[q + 2] = pal[ci * 3 + 2]; cur[q + 3] = 255;
+          }
+        }
+      }
+      if (want.has(i)) out.set(i, cur.slice());
+      if (fr.disposal === 2) {
+        for (let y = fr.y; y < Math.min(H, fr.y + fr.h); y++) cur.fill(0, (y * W + fr.x) * 4, (y * W + Math.min(W, fr.x + fr.w)) * 4);
+      } else if (saved) cur = saved;
+    }
+    return out;
+  }
+  const gifDelay = (d) => (d <= 10 ? 100 : d); // ブラウザと同じく 0〜10ms は 100ms とみなす
+  function isAnimated(f) { return !!(f && f.anim && settings.animate); }
+  function animKey(f) { return isAnimated(f) ? 'A' + settings.animStep + 'x' + settings.animMax : ''; }
+  // 間引き・最大コマ数から使うコマを選ぶ（再生時間は元のまま）
+  function selectFrames(g) {
+    const n = g.frames.length, step = settings.animStep, max = settings.animMax;
+    let idx = [];
+    for (let i = 0; i < n; i += step) idx.push(i);
+    if (max && idx.length > max) { const pick = []; for (let k = 0; k < max; k++) pick.push(idx[Math.floor(k * idx.length / max)]); idx = pick; }
+    const delays = g.frames.map((fr) => gifDelay(fr.delay));
+    return idx.map((i, k) => {
+      const until = k + 1 < idx.length ? idx[k + 1] : n;
+      let d = 0; for (let j = i; j < until; j++) d += delays[j];
+      return { i, delay: d };
+    });
+  }
+  function repeatText(loop) { return loop === 0 ? '繰り返し再生' : loop < 0 ? '1回だけ再生' : (loop + 1) + '回再生'; }
+
+  async function animFit(f, mode, gen) {
+    const g = f.anim.gif, W = g.W, H = g.H;
+    const sel = selectFrames(g);
+    const frames = renderGifFrames(g, new Set(sel.map((s) => s.i)));
+    const n = sel.length;
+    const budget = settings.limit ? Math.max(600, Math.floor((LIMIT - 300 - n * 230) / n)) : 0;
+    const parts = [];
+    let paths = 0, colors = 0, tracedW = W, tracedH = H, bgRatio = 0, bgColors = [], adjusted = false;
+    for (let k = 0; k < n; k++) {
+      if (gen !== convertGen) throw cancelled();
+      const label = 'コマ ' + (k + 1) + ' / ' + n;
+      $('#busyText').textContent = label + ' を変換中…';
+      const rgba = frames.get(sel[k].i);
+      let hasAlpha = false;
+      for (let q = 3; q < rgba.length; q += 4) if (rgba[q] < 250) { hasAlpha = true; break; }
+      const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+      cv.getContext('2d').putImageData(new ImageData(rgba, W, H), 0, 0);
+      let src = { w: W, h: H, img: cv, type: 'image/png', hasAlpha, cutout: hasAlpha, dataURL: null, file: null, size: 0 };
+      if (settings.removeBg) {
+        // コマごとに切り抜く（コマの大きさが揃うよう、余白の切り詰めはしない）
+        src = await removeBackground(src, settings.bgTol, settings.bgInner, false, usesLasso(f) ? f.lasso : null, settings.lassoRefine);
+        bgRatio += src.bg.ratio / n; bgColors = src.bg.colors.length ? src.bg.colors : bgColors;
+      }
+      if (gen !== convertGen) throw cancelled();
+      let r;
+      if (mode === 'embed') {
+        if (!src.file) src.file = await canvasBlob(cv, 'image/png');
+        r = await embedFit(src, gen, budget);
+      } else {
+        r = await traceFit(src, gen, mode, budget);
+        paths += r.paths; colors = Math.max(colors, r.colors);
+        tracedW = r.tracedW; tracedH = r.tracedH;
+      }
+      if (r.fit) adjusted = true;
+      const vb = r.svg.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/);
+      const sx = vb ? W / Number(vb[1]) : 1, sy = vb ? H / Number(vb[2]) : 1;
+      const body = r.svg.slice(r.svg.indexOf('>') + 1, r.svg.lastIndexOf('</svg>')).trim();
+      const tf = (Math.abs(sx - 1) > 1e-6 || Math.abs(sy - 1) > 1e-6) ? ' transform="scale(' + +sx.toFixed(5) + ' ' + +sy.toFixed(5) + ')"' : '';
+      const prev = parts[parts.length - 1];
+      if (prev && prev.body === body && prev.tf === tf) prev.delay += sel[k].delay; // 同じ絵が続くコマはまとめる
+      else parts.push({ body, tf, delay: sel[k].delay });
+    }
+    const total = parts.reduce((s, p) => s + p.delay, 0);
+    const rep = g.loop === 0 ? 'indefinite' : g.loop < 0 ? '1' : String(g.loop + 1);
+    const fmt = (v) => +v.toFixed(5);
+    let t = 0;
+    const groups = parts.map((p, k) => {
+      const start = t / total, end = (t + p.delay) / total;
+      t += p.delay;
+      let anim = '';
+      if (parts.length > 1) {
+        let values, keyTimes;
+        if (k === 0) { values = 'visible;hidden'; keyTimes = '0;' + fmt(end); }
+        else if (k === parts.length - 1) { values = 'hidden;visible'; keyTimes = '0;' + fmt(start); }
+        else { values = 'hidden;visible;hidden'; keyTimes = '0;' + fmt(start) + ';' + fmt(end); }
+        anim = '<animate attributeName="visibility" values="' + values + '" keyTimes="' + keyTimes + '" dur="' + fmt(total / 1000) + 's" calcMode="discrete" repeatCount="' + rep + '" fill="freeze"/>\n';
+      }
+      return '<g visibility="' + (k === 0 ? 'visible' : 'hidden') + '"' + p.tf + '>\n' + anim + p.body + '\n</g>';
+    });
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">\n' + groups.join('\n') + '\n</svg>\n';
+    const bytes = svgBytes(svg);
+    return {
+      svg, paths, colors: mode === 'embed' ? null : colors, tracedW, tracedH,
+      anim: { total: g.frames.length, picked: n, used: parts.length, dur: total, loop: g.loop },
+      animBg: settings.removeBg ? { ratio: bgRatio, colors: bgColors, lasso: usesLasso(f) } : null,
+      fit: settings.limit && (adjusted || bytes > LIMIT) ? { kind: 'anim', ok: bytes <= LIMIT, perFrame: budget } : null
+    };
   }
 
   function fitMessage(f, r) {
     const fit = r.fit;
     if (!fit) return '';
+    if (fit.kind === 'anim') {
+      return fit.ok
+        ? '50KBに収まるよう、1コマあたり約' + fmtBytes(fit.perFrame) + 'を目安に各コマを軽くしました（合計 ' + fmtBytes(r.bytes) + '）。'
+        : '50KB以内に収まりませんでした（' + fmtBytes(r.bytes) + '）。「コマを間引く」を増やすか「最大コマ数」を減らすと小さくなります。';
+    }
     if (!fit.ok) {
       return '50KB以内に収まりませんでした（最小 ' + fmtBytes(r.bytes) + '）。' +
         (fit.kind === 'trace' ? '細かい写真などは「埋め込み」方式のほうが小さくなることがあります。' : '画像が大きすぎるため、事前に縮小してからお試しください。');
@@ -1422,7 +1691,12 @@ textarea#code {
       }
       if (settings.bgMethod === 'lasso' && !r.bg.lasso) tips.push('この画像はまだ線で囲んでいないため、自動で切り抜きました。「範囲を描く」で囲めます。');
     }
-    if (f.type === 'image/gif') tips.push('GIFアニメは最初のコマだけを変換します。');
+    if (r.anim) {
+      const a = r.anim;
+      tips.push('アニメーション：元の' + a.total + 'コマから' + a.picked + 'コマを使い、' + a.used + 'コマのSVGアニメにしました' +
+        (a.used < a.picked ? '（同じ絵が続くコマはまとめています）' : '') + '。1周 ' + (a.dur / 1000).toFixed(1) + '秒・' + repeatText(a.loop) + '。');
+      if (r.animBg) tips.push('背景透過：コマごとに' + (r.animBg.lasso ? '線で囲んだ範囲で' : '外周の色から') + '切り抜き、平均で画像の' + Math.round(r.animBg.ratio * 100) + '%を透明にしました' + (settings.bgCrop ? '（アニメーションではコマの大きさを揃えるため、余白は切り詰めません）' : '') + '。');
+    } else if (f.anim) tips.push('「アニメーションとして変換」がオフのため、最初のコマだけを変換しています。');
     if (f.pef) tips.push('PEFはRAWデータを現像せず、ファイルに記録されたプレビューJPEG（' + f.w + '×' + f.h + 'px）を変換しています。');
     if (r.mode !== settings.mode) tips.push('一括変換中：「' + MODE_LABEL[r.mode] + '」方式の結果を表示しています。');
     if (!settings.limit && r.mode !== 'embed' && r.bytes > 3000000) tips.push('SVGが大きくなっています。色数を減らすか、ノイズ除去を上げるか、トレース解像度を下げると軽くなります。');
@@ -1624,6 +1898,7 @@ textarea#code {
     $('#fillGaps').checked = settings.fillGaps;
     $('#limitToggle').checked = settings.limit;
     $('#bgToggle').checked = settings.removeBg;
+    syncAnimUI();
     $('#bgOpts').hidden = !settings.removeBg;
     $('#bgTol').value = settings.bgTol; $('#bgTolOut').textContent = settings.bgTol;
     $('#bgInner').checked = settings.bgInner;
@@ -1659,6 +1934,24 @@ textarea#code {
     try { localStorage.setItem('svgtrace.limit50', settings.limit ? '1' : '0'); } catch (err) { /* 保存領域なし */ }
     convert();
   });
+  function syncAnimUI() {
+    const any = files.some((x) => x.anim);
+    $('#secAnim').hidden = !any;
+    $('#animToggle').checked = settings.animate;
+    $('#animOpts').hidden = !settings.animate;
+    $('#animStep').value = String(settings.animStep);
+    $('#animMax').value = String(settings.animMax);
+    const f = active();
+    let note;
+    if (f && f.anim) {
+      const sel = selectFrames(f.anim.gif);
+      note = '「' + f.name + '」：' + f.anim.count + 'コマ・1周' + (f.anim.dur / 1000).toFixed(1) + '秒。このうち' + sel.length + 'コマを変換します。間引くほど軽くなり、動きは粗くなります（再生時間は変わりません）。';
+    } else note = '選択中の画像はアニメーションではありません。アニメーションのGIFを選ぶとコマ数を確認できます。';
+    $('#animNote').textContent = note;
+  }
+  $('#animToggle').addEventListener('change', (e) => { settings.animate = e.target.checked; saveAnimPrefs(); syncControls(); convert(); });
+  $('#animStep').addEventListener('change', (e) => { settings.animStep = Number(e.target.value); saveAnimPrefs(); syncControls(); convert(); });
+  $('#animMax').addEventListener('change', (e) => { settings.animMax = Number(e.target.value); saveAnimPrefs(); syncControls(); convert(); });
   $('#bgToggle').addEventListener('change', (e) => {
     settings.removeBg = e.target.checked; saveBgPrefs(); syncControls();
     if (!settings.removeBg) exitDraw();
@@ -1779,7 +2072,7 @@ textarea#code {
   });
 
   function setLocked(on) {
-    $$('.seg button, #presets button, #secTune input, #secTune select, #limitToggle, #bgToggle, #bgOpts input, #bgOpts button, #pick, .bmodes input').forEach((el) => { el.disabled = on; });
+    $$('.seg button, #presets button, #secTune input, #secTune select, #limitToggle, #bgToggle, #bgOpts input, #bgOpts button, #animToggle, #animOpts select, #pick, .bmodes input').forEach((el) => { el.disabled = on; });
     if (!on) syncLassoUI();
     $('#files').classList.toggle('locked', on);
   }
